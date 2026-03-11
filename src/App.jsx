@@ -42,7 +42,6 @@ function layoutTasks(taskList, totalCols, base) {
     const e=diffDays(base,parseKey(t.end_key))
     return {...t,col:s,endCol:e}
   }).filter(t=>t.endCol>=0&&t.col<totalCols)
-
   const lanes=[], result=[]
   for(const t of [...placed].sort((a,b)=>a.col-b.col)){
     let lane=lanes.findIndex(l=>(l[l.length-1]||{}).endCol<t.col)
@@ -53,7 +52,7 @@ function layoutTasks(taskList, totalCols, base) {
   return result
 }
 
-// ===================== グローバルCSS注入 =====================
+// ===================== グローバルCSS =====================
 const CSS = `
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-serif;min-height:100vh}
@@ -172,8 +171,8 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-preview-done-btn.is-done{background:#DCFCE7;border-color:#86EFAC;color:#16A34A}
 `
 
-// ===================== 今日・明日ビュー（外部コンポーネント） =====================
-const DayView = memo(function DayView({ which, tasks, taskMatchesFilter, toggleDone, setPreviewTask }) {
+// ===================== DayView =====================
+const DayView = memo(function DayView({ which, filteredTasks, toggleDone, setPreviewTask }) {
   const targetDate = which === "tomorrow" ? addDays(now, 1) : now
   const targetKey  = toKey(targetDate)
   const month = targetDate.getMonth() + 1
@@ -181,9 +180,9 @@ const DayView = memo(function DayView({ which, tasks, taskMatchesFilter, toggleD
   const dow   = DAYS_JA[targetDate.getDay()]
   const label = which === "tomorrow" ? "明日の作業" : "本日の作業"
 
-  const dayTasks = tasks.filter(t => {
+  const dayTasks = filteredTasks.filter(t => {
     const s = parseKey(t.start_key), e = parseKey(t.end_key), target = parseKey(targetKey)
-    return target >= s && target <= e && taskMatchesFilter(t)
+    return target >= s && target <= e
   })
   const doneCount = dayTasks.filter(t => t.done).length
 
@@ -192,12 +191,12 @@ const DayView = memo(function DayView({ which, tasks, taskMatchesFilter, toggleD
       <div className="kh-dv-header">
         <span>{label}</span>
         <span className="kh-dv-badge">{month}月{date}日（{dow}）</span>
-        <span style={{ fontSize: 11, color: "#888", fontWeight: 600 }}>{dayTasks.length}件</span>
+        <span style={{fontSize:11,color:"#888",fontWeight:600}}>{dayTasks.length}件</span>
       </div>
       {dayTasks.length === 0 ? (
         <div className="kh-dv-empty">
           📋 {label}はありません
-          <br /><span style={{ fontSize: 12, color: "#BBB", marginTop: 6, display: "block" }}>工程表タブから追加できます</span>
+          <br/><span style={{fontSize:12,color:"#BBB",marginTop:6,display:"block"}}>工程表タブから追加できます</span>
         </div>
       ) : (
         <>
@@ -206,19 +205,19 @@ const DayView = memo(function DayView({ which, tasks, taskMatchesFilter, toggleD
             const days = diffDays(parseKey(t.start_key), parseKey(t.end_key))
             return (
               <div key={t.id} className={`kh-card${t.done ? " done" : ""}`}>
-                <div className="kh-card-accent" style={{ background: c.bg }} />
+                <div className="kh-card-accent" style={{background:c.bg}}/>
                 <div className="kh-card-body" onClick={() => setPreviewTask(t)}>
                   <div className="kh-card-title">{t.text}</div>
                   <div className="kh-card-meta">
                     <span>🏗 {c.label}</span>
-                    <span>🏢 {t.assignee || "未設定"}</span>
-                    {days > 0 && <span>📆 {days + 1}日間</span>}
+                    <span>🏢 {t.assignee||"未設定"}</span>
+                    {days > 0 && <span>📆 {days+1}日間</span>}
                   </div>
                 </div>
                 <div className="kh-card-right">
                   <button
-                    className={`kh-card-done-btn${t.done ? " checked" : ""}`}
-                    onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
+                    className={`kh-card-done-btn${t.done?" checked":""}`}
+                    onClick={e=>{e.stopPropagation();toggleDone(t.id)}}
                   >✓</button>
                 </div>
               </div>
@@ -233,57 +232,55 @@ const DayView = memo(function DayView({ which, tasks, taskMatchesFilter, toggleD
   )
 })
 
-// ===================== 工程表ビュー（外部コンポーネント） =====================
+// ===================== ScheduleView =====================
 const ScheduleView = memo(function ScheduleView({
-  tasks, viewDays, base, navLabel, colDates,
-  taskMatchesFilter, toggleDone, deleteTaskById,
-  setNavOffset, openModal, setPreviewTask, isMobile
+  filteredTasks, viewDays, base, navLabel, colDates,
+  toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, isMobile
 }) {
-  const filteredTasks = tasks.filter(taskMatchesFilter)
   const laidOut = layoutTasks(filteredTasks, viewDays, base)
   const maxLane = laidOut.reduce((m, t) => Math.max(m, t.lane), -1)
   const LANE_H  = 26
   const GRID_H  = Math.max((maxLane + 1) * LANE_H + 8, 56)
   const weeks   = []
-  for (let i = 0; i < viewDays; i += 7) weeks.push({ wo: i, days: colDates.slice(i, i + 7) })
+  for (let i = 0; i < viewDays; i += 7) weeks.push({wo:i, days:colDates.slice(i, i+7)})
 
   return (
     <>
       <div className="kh-nav">
-        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o - 1)}>◀ 前週</button>
+        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o-1)}>◀ 前週</button>
         <span className="kh-nav-label">{navLabel}</span>
-        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o + 1)}>次週 ▶</button>
+        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o+1)}>次週 ▶</button>
       </div>
       {isMobile && viewDays > 7 && <div className="kh-zoom-hint">🔍 ピンチ操作で拡大できます</div>}
       <div className="kh-grid-wrap">
-        {weeks.map(({ wo, days: week }) => {
+        {weeks.map(({wo, days: week}) => {
           const wLen = week.length
           const weekTasks = laidOut.filter(t => t.endCol >= wo && t.col < wo + wLen)
           return (
             <div key={wo} className="kh-week-block">
-              <div className="kh-day-header" style={{ gridTemplateColumns: `repeat(${wLen},1fr)` }}>
+              <div className="kh-day-header" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
                 {week.map((date, di) => {
                   const dow = date.getDay(), key = toKey(date), isToday = key === todayKey
-                  const cls = isToday ? "today" : dow === 0 ? "sun" : dow === 6 ? "sat" : ""
+                  const cls = isToday ? "today" : dow===0 ? "sun" : dow===6 ? "sat" : ""
                   return (
-                    <div key={di} className={`kh-day-cell${cls ? " " + cls : ""}`} onClick={() => openModal(key)}>
+                    <div key={di} className={`kh-day-cell${cls?" "+cls:""}`} onClick={() => openModal(key)}>
                       <div className="kh-day-left">
-                        <span className={`kh-dow${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>{DAYS_JA[dow]}</span>
-                        <span className={`kh-dnum${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>{date.getDate()}</span>
-                        <span className="kh-dmonth">{date.getMonth() + 1}月</span>
+                        <span className={`kh-dow${dow===0?" sun":dow===6?" sat":""}`}>{DAYS_JA[dow]}</span>
+                        <span className={`kh-dnum${dow===0?" sun":dow===6?" sat":""}`}>{date.getDate()}</span>
+                        <span className="kh-dmonth">{date.getMonth()+1}月</span>
                       </div>
                       <span className="kh-plus">＋</span>
                     </div>
                   )
                 })}
               </div>
-              <div className="kh-task-area" style={{ height: GRID_H }}>
-                <div className="kh-col-grid" style={{ gridTemplateColumns: `repeat(${wLen},1fr)` }}>
+              <div className="kh-task-area" style={{height:GRID_H}}>
+                <div className="kh-col-grid" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
                   {week.map((date, di) => (
                     <div key={di} className="kh-col-div"
                       style={{
-                        background: date.getDay() === 0 ? "rgba(200,0,0,0.04)" : date.getDay() === 6 ? "rgba(0,0,200,0.04)" : "transparent",
-                        borderRight: di === wLen - 1 ? "none" : undefined,
+                        background: date.getDay()===0?"rgba(200,0,0,0.04)":date.getDay()===6?"rgba(0,0,200,0.04)":"transparent",
+                        borderRight: di===wLen-1?"none":undefined,
                       }}
                     />
                   ))}
@@ -291,42 +288,42 @@ const ScheduleView = memo(function ScheduleView({
                 {weekTasks.map(t => {
                   const c  = COLORS.find(x => x.id === t.color) || COLORS[0]
                   const ls = Math.max(t.col - wo, 0)
-                  const le = Math.min(t.endCol - wo, wLen - 1)
+                  const le = Math.min(t.endCol - wo, wLen-1)
                   const span = le - ls + 1
                   const sh = t.col >= wo
                   const eh = t.endCol < wo + wLen
                   return (
                     <div key={t.id}
-                      className={`kh-task-bar${t.done ? " done" : ""}`}
-                      title={`${t.text}${t.assignee ? " ／ " + t.assignee : ""}`}
+                      className={`kh-task-bar${t.done?" done":""}`}
+                      title={`${t.text}${t.assignee?" ／ "+t.assignee:""}`}
                       style={{
-                        top: t.lane * LANE_H + 3,
-                        left: `calc(${ls * 100 / wLen}% + ${sh ? 2 : 0}px)`,
-                        width: `calc(${span * 100 / wLen}% - ${(sh ? 2 : 0) + (eh ? 2 : 0)}px)`,
-                        height: LANE_H - 4,
+                        top: t.lane*LANE_H+3,
+                        left: `calc(${ls*100/wLen}% + ${sh?2:0}px)`,
+                        width: `calc(${span*100/wLen}% - ${(sh?2:0)+(eh?2:0)}px)`,
+                        height: LANE_H-4,
                         background: c.bg,
-                        borderRadius: `${sh ? 4 : 0}px ${eh ? 4 : 0}px ${eh ? 4 : 0}px ${sh ? 4 : 0}px`,
-                        paddingLeft: sh ? 5 : 2,
-                        paddingRight: eh ? 4 : 2,
+                        borderRadius: `${sh?4:0}px ${eh?4:0}px ${eh?4:0}px ${sh?4:0}px`,
+                        paddingLeft: sh?5:2,
+                        paddingRight: eh?4:2,
                         zIndex: 10,
                       }}
                       onClick={() => setPreviewTask(t)}
                     >
-                      {!sh && <span style={{ marginRight: 2, opacity: 0.8, fontSize: 8 }}>◀</span>}
-                      <span className="kh-bar-text" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {t.assignee && <span style={{ opacity: 0.7, marginRight: 2 }}>{t.assignee}</span>}
+                      {!sh && <span style={{marginRight:2,opacity:0.8,fontSize:8}}>◀</span>}
+                      <span className="kh-bar-text" style={{flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>
+                        {t.assignee && <span style={{opacity:0.7,marginRight:2}}>{t.assignee}</span>}
                         {t.text}
                       </span>
-                      {!eh && <span style={{ marginLeft: 2, opacity: 0.8, fontSize: 8 }}>▶</span>}
+                      {!eh && <span style={{marginLeft:2,opacity:0.8,fontSize:8}}>▶</span>}
                       {eh && (
                         <>
                           <button
-                            className={`kh-done-check${t.done ? " checked" : ""}`}
-                            onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
-                          >{t.done ? "✓" : ""}</button>
+                            className={`kh-done-check${t.done?" checked":""}`}
+                            onClick={e=>{e.stopPropagation();toggleDone(t.id)}}
+                          >{t.done?"✓":""}</button>
                           <button
-                            onClick={e => { e.stopPropagation(); deleteTaskById(t.id) }}
-                            style={{ marginLeft: 2, background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 3, color: "#fff", fontSize: 8, cursor: "pointer", padding: "1px 3px", flexShrink: 0 }}
+                            onClick={e=>{e.stopPropagation();deleteTaskById(t.id)}}
+                            style={{marginLeft:2,background:"rgba(0,0,0,0.25)",border:"none",borderRadius:3,color:"#fff",fontSize:8,cursor:"pointer",padding:"1px 3px",flexShrink:0}}
                           >✕</button>
                         </>
                       )}
@@ -341,7 +338,7 @@ const ScheduleView = memo(function ScheduleView({
       <div className="kh-legend">
         {COLORS.map(c => (
           <div key={c.id} className="kh-legend-item">
-            <div className="kh-legend-dot" style={{ background: c.bg }} />
+            <div className="kh-legend-dot" style={{background:c.bg}}/>
             {c.label}
           </div>
         ))}
@@ -350,7 +347,7 @@ const ScheduleView = memo(function ScheduleView({
   )
 })
 
-// ===================== プレビューカード（外部コンポーネント） =====================
+// ===================== PreviewCard =====================
 const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openModal }) {
   if (!task) return null
   const c = COLORS.find(x => x.id === task.color) || COLORS[0]
@@ -360,8 +357,8 @@ const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openM
   return (
     <div className="kh-preview-bg" onClick={onClose}>
       <div className="kh-preview-card" onClick={ev => ev.stopPropagation()}>
-        <div className="kh-preview-accent" style={{ background: c.bg }}>
-          <div style={{ flex: 1 }}>
+        <div className="kh-preview-accent" style={{background:c.bg}}>
+          <div style={{flex:1}}>
             <div className="kh-preview-type-badge">🏗 {c.label}</div>
             <div className="kh-preview-title">{task.text}</div>
           </div>
@@ -372,33 +369,33 @@ const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openM
           <div className="kh-preview-daterange">
             <div className="kh-preview-date-block">
               <div className="kh-preview-date-label">📅 開始日</div>
-              <div className="kh-preview-date-value">{s.getMonth() + 1}/{s.getDate()}</div>
+              <div className="kh-preview-date-value">{s.getMonth()+1}/{s.getDate()}</div>
               <div className="kh-preview-date-sub">{DAYS_JA[s.getDay()]}曜日</div>
             </div>
             <div className="kh-preview-date-arrow">→</div>
             <div className="kh-preview-date-block">
               <div className="kh-preview-date-label">🏁 終了日</div>
-              <div className="kh-preview-date-value">{e.getMonth() + 1}/{e.getDate()}</div>
+              <div className="kh-preview-date-value">{e.getMonth()+1}/{e.getDate()}</div>
               <div className="kh-preview-date-sub">{DAYS_JA[e.getDay()]}曜日</div>
             </div>
           </div>
           <div className="kh-preview-duration">
-            {days === 0 ? "📌 単日作業" : `📆 ${days + 1}日間（${task.start_key} 〜 ${task.end_key}）`}
+            {days===0 ? "📌 単日作業" : `📆 ${days+1}日間（${task.start_key} 〜 ${task.end_key}）`}
           </div>
           <div className="kh-preview-info-row">
             <div className="kh-preview-info-item">
               <div className="kh-preview-info-label">🏢 会社名</div>
-              <div className={`kh-preview-info-value${company ? "" : " empty"}`}>{company || "未設定"}</div>
+              <div className={`kh-preview-info-value${company?"":" empty"}`}>{company||"未設定"}</div>
             </div>
             <div className="kh-preview-info-item">
               <div className="kh-preview-info-label">👤 担当者</div>
-              <div className={`kh-preview-info-value${person ? "" : " empty"}`}>{person || "未設定"}</div>
+              <div className={`kh-preview-info-value${person?"":" empty"}`}>{person||"未設定"}</div>
             </div>
           </div>
         </div>
         <div className="kh-preview-actions">
           <button
-            className={`kh-preview-done-btn${task.done ? " is-done" : ""}`}
+            className={`kh-preview-done-btn${task.done?" is-done":""}`}
             onClick={() => toggleDone(task.id)}
           >{task.done ? "↩ 未完了に戻す" : "✓ 完了にする"}</button>
           <button
@@ -411,7 +408,7 @@ const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openM
   )
 })
 
-// ===================== 編集モーダル（外部コンポーネント） =====================
+// ===================== EditModal =====================
 const EditModal = memo(function EditModal({
   editId, taskText, setTaskText,
   companyInput, setCompanyInput,
@@ -420,12 +417,10 @@ const EditModal = memo(function EditModal({
   endDate, setEndDate,
   selectedColor, setSelectedColor,
   assigneeHistory, setAssigneeHistory,
-  saveTask, deleteTaskById, closeModal,
-  taskTextRef
+  saveTask, deleteTaskById, closeModal, taskTextRef
 }) {
   const isEdit = editId !== null
   const onStartChange = (v) => { setStartDate(v); if (v > endDate) setEndDate(v) }
-
   return (
     <div className="kh-modal-bg" onClick={closeModal}>
       <div className="kh-modal" onClick={e => e.stopPropagation()}>
@@ -436,15 +431,15 @@ const EditModal = memo(function EditModal({
         <div className="kh-field-label">🔨 作業内容</div>
         <input ref={taskTextRef} className="kh-task-input" value={taskText}
           onChange={e => setTaskText(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && saveTask()}
-          placeholder="例：1F 配筋検査 13:00〜" />
+          onKeyDown={e => e.key==="Enter" && saveTask()}
+          placeholder="例：1F 配筋検査 13:00〜"/>
         <div className="kh-assignee-wrap">
           <div className="kh-field-label">🏢 担当</div>
           <div className="kh-assignee-row">
             <input className="kh-assignee-input" value={companyInput}
-              onChange={e => setCompanyInput(e.target.value)} placeholder="会社名（例：山田工務店）" />
+              onChange={e => setCompanyInput(e.target.value)} placeholder="会社名（例：山田工務店）"/>
             <input className="kh-assignee-input" value={personInput}
-              onChange={e => setPersonInput(e.target.value)} placeholder="担当者名（例：田中）" />
+              onChange={e => setPersonInput(e.target.value)} placeholder="担当者名（例：田中）"/>
           </div>
           {assigneeHistory.length > 0 && (
             <>
@@ -453,25 +448,25 @@ const EditModal = memo(function EditModal({
                 {assigneeHistory.map((h, i) => (
                   <div key={i} className="kh-history-item">
                     <button className="kh-history-name"
-                      onClick={() => { setCompanyInput(h.company || ""); setPersonInput(h.person || "") }}>
-                      {h.company && h.person ? `${h.company} ${h.person}` : h.company || h.person}
+                      onClick={() => { setCompanyInput(h.company||""); setPersonInput(h.person||"") }}>
+                      {h.company&&h.person ? `${h.company} ${h.person}` : h.company||h.person}
                     </button>
                     <button className="kh-history-del"
-                      onClick={() => setAssigneeHistory(prev => prev.filter((_, j) => j !== i))}>×</button>
+                      onClick={() => setAssigneeHistory(prev => prev.filter((_,j) => j!==i))}>×</button>
                   </div>
                 ))}
               </div>
             </>
           )}
         </div>
-        <div className="kh-field-label" style={{ marginBottom: 8 }}>🏗 工種</div>
+        <div className="kh-field-label" style={{marginBottom:8}}>🏗 工種</div>
         <div className="kh-color-btns">
           {COLORS.map(c => (
             <button key={c.id} className="kh-color-btn"
               style={{
                 background: c.bg,
-                transform: selectedColor === c.id ? "scale(1.1)" : "none",
-                outline: selectedColor === c.id ? `3px solid ${c.bg}` : "none",
+                transform: selectedColor===c.id ? "scale(1.1)" : "none",
+                outline: selectedColor===c.id ? `3px solid ${c.bg}` : "none",
                 outlineOffset: 2,
               }}
               onClick={() => setSelectedColor(c.id)}
@@ -482,13 +477,13 @@ const EditModal = memo(function EditModal({
           <div className="kh-date-col">
             <div className="kh-field-label">📅 開始日</div>
             <input type="date" className="kh-date-input" value={startDate}
-              onChange={e => onStartChange(e.target.value)} />
+              onChange={e => onStartChange(e.target.value)}/>
           </div>
-          <div style={{ fontSize: 20, color: "#C8C3BA", paddingBottom: 8 }}>→</div>
+          <div style={{fontSize:20,color:"#C8C3BA",paddingBottom:8}}>→</div>
           <div className="kh-date-col">
             <div className="kh-field-label">🏁 終了日</div>
             <input type="date" className="kh-date-input" value={endDate}
-              onChange={e => setEndDate(e.target.value)} />
+              onChange={e => setEndDate(e.target.value)}/>
           </div>
         </div>
         <button className="kh-save-btn" onClick={saveTask}>{isEdit ? "更新する" : "追加する"}</button>
@@ -497,9 +492,8 @@ const EditModal = memo(function EditModal({
   )
 })
 
-// ===================== メインコンポーネント =====================
+// ===================== App =====================
 export default function App() {
-  // ---- State ----
   const [tasks, setTasks]                     = useState([])
   const [navOffset, setNavOffset]             = useState(0)
   const [viewDays, setViewDays]               = useState(14)
@@ -508,140 +502,176 @@ export default function App() {
   const [filterColor, setFilterColor]         = useState("")
   const [previewTask, setPreviewTask]         = useState(null)
   const [assigneeHistory, setAssigneeHistory] = useState([])
-
-  // モーダル用state
-  const [modalOpen, setModalOpen]         = useState(false)
-  const [editId, setEditId]               = useState(null)
-  const [selectedColor, setSelectedColor] = useState("orange")
-  const [taskText, setTaskText]           = useState("")
-  const [companyInput, setCompanyInput]   = useState("")
-  const [personInput, setPersonInput]     = useState("")
-  const [startDate, setStartDate]         = useState("")
-  const [endDate, setEndDate]             = useState("")
+  const [modalOpen, setModalOpen]             = useState(false)
+  const [editId, setEditId]                   = useState(null)
+  const [selectedColor, setSelectedColor]     = useState("orange")
+  const [taskText, setTaskText]               = useState("")
+  const [companyInput, setCompanyInput]       = useState("")
+  const [personInput, setPersonInput]         = useState("")
+  const [startDate, setStartDate]             = useState("")
+  const [endDate, setEndDate]                 = useState("")
 
   const taskTextRef = useRef(null)
   const isMobile    = typeof window !== "undefined" && window.innerWidth <= 768
 
-  // ---- CSS注入 ----
+  // CSS注入
   useEffect(() => {
     const style = document.createElement("style")
-    style.setAttribute("data-kh", "1")
+    style.setAttribute("data-kh","1")
     style.textContent = CSS
     document.head.appendChild(style)
     return () => document.head.removeChild(style)
   }, [])
 
-  // ---- Supabase リアルタイム購読 ----
+  // Supabase 初期取得 + リアルタイム購読
   useEffect(() => {
-    supabase.from("tasks").select("*").order("start_key").then(({ data }) => {
-      if (data) setTasks(data.map(t => ({ ...t, done: t.done || false })))
+    supabase.from("tasks").select("*").order("start_key").then(({data}) => {
+      if (data) setTasks(data.map(t => ({...t, done: t.done||false})))
     })
     const channel = supabase
-      .channel("tasks-channel")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks" }, ({ new: rec }) => {
-        setTasks(prev => [...prev, { ...rec, done: rec.done || false }])
+      .channel("tasks-rt")
+      .on("postgres_changes", {event:"INSERT", schema:"public", table:"tasks"}, ({new:rec}) => {
+        // ★ 重複チェック：楽観的更新で既に追加済みの場合は上書き（IDで照合）
+        setTasks(prev => {
+          const exists = prev.some(t => t.id === rec.id)
+          if (exists) return prev.map(t => t.id===rec.id ? {...rec, done:rec.done||false} : t)
+          return [...prev, {...rec, done:rec.done||false}]
+        })
       })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks" }, ({ new: rec }) => {
-        setTasks(prev => prev.map(t => t.id === rec.id ? { ...rec, done: rec.done || false } : t))
-        setPreviewTask(prev => prev && prev.id === rec.id ? { ...rec, done: rec.done || false } : prev)
+      .on("postgres_changes", {event:"UPDATE", schema:"public", table:"tasks"}, ({new:rec}) => {
+        setTasks(prev => prev.map(t => t.id===rec.id ? {...rec, done:rec.done||false} : t))
+        setPreviewTask(prev => prev&&prev.id===rec.id ? {...rec, done:rec.done||false} : prev)
       })
-      .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks" }, ({ old: rec }) => {
-        setTasks(prev => prev.filter(t => t.id !== rec.id))
+      .on("postgres_changes", {event:"DELETE", schema:"public", table:"tasks"}, ({old:rec}) => {
+        setTasks(prev => prev.filter(t => t.id!==rec.id))
       })
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [])
 
-  // ---- フィルター ----
-  const taskMatchesFilter = useCallback((t) => {
-    if (filterName  && !(t.assignee || "").includes(filterName)) return false
-    if (filterColor && t.color !== filterColor)                   return false
-    return true
-  }, [filterName, filterColor])
-
-  // ---- 完了トグル ----
+  // 完了トグル
   const toggleDone = useCallback(async (id) => {
-    const task = tasks.find(t => t.id === id)
+    const task = tasks.find(t => t.id===id)
     if (!task) return
     const newDone = !task.done
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: newDone } : t))
-    setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: newDone } : prev)
-    await supabase.from("tasks").update({ done: newDone }).eq("id", id)
+    setTasks(prev => prev.map(t => t.id===id ? {...t, done:newDone} : t))
+    setPreviewTask(prev => prev&&prev.id===id ? {...prev, done:newDone} : prev)
+    await supabase.from("tasks").update({done:newDone}).eq("id",id)
   }, [tasks])
 
-  // ---- モーダルを開く ----
-  const openModal = useCallback((dateKey, task = null) => {
+  // モーダルを開く
+  const openModal = useCallback((dateKey, task=null) => {
     setEditId(task ? task.id : null)
     setSelectedColor(task ? task.color : "orange")
     setTaskText(task ? task.text : "")
     setStartDate(task ? task.start_key : dateKey)
     setEndDate(task ? task.end_key : dateKey)
-    const { company, person } = splitAssignee(task ? task.assignee : "")
+    const {company, person} = splitAssignee(task ? task.assignee : "")
     setCompanyInput(company)
     setPersonInput(person)
     setModalOpen(true)
     setTimeout(() => taskTextRef.current?.focus(), 80)
   }, [])
 
-  // ---- モーダルを閉じる ----
   const closeModal = useCallback(() => setModalOpen(false), [])
 
-  // ---- タスク保存 ----
+  // ★★★ タスク保存：楽観的更新で即座にローカルに追加 ★★★
   const saveTask = useCallback(async () => {
     const text = taskText.trim()
     if (!text) return
     const company  = companyInput.trim()
     const person   = personInput.trim()
     const assignee = assigneeLabel(company, person)
+
     if (company || person) {
       setAssigneeHistory(prev => {
-        const exists = prev.some(h => h.company === company && h.person === person)
-        return exists ? prev : [...prev, { company, person }]
+        const exists = prev.some(h => h.company===company && h.person===person)
+        return exists ? prev : [...prev, {company, person}]
       })
     }
-    setModalOpen(false)  // 先にモーダルを閉じる
+
+    // モーダルを閉じる
+    setModalOpen(false)
+
     if (editId) {
-      await supabase.from("tasks").update({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor }).eq("id", editId)
+      // 編集：楽観的更新
+      setTasks(prev => prev.map(t =>
+        t.id===editId
+          ? {...t, text, assignee, start_key:startDate, end_key:endDate, color:selectedColor}
+          : t
+      ))
+      await supabase.from("tasks")
+        .update({text, assignee, start_key:startDate, end_key:endDate, color:selectedColor})
+        .eq("id", editId)
     } else {
-      await supabase.from("tasks").insert({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, done: false })
+      // 新規：楽観的更新（仮IDで即追加）
+      const tempId = "temp-" + Date.now()
+      const newTask = {
+        id: tempId,
+        text, assignee,
+        start_key: startDate,
+        end_key: endDate,
+        color: selectedColor,
+        done: false,
+      }
+      setTasks(prev => [...prev, newTask])
+
+      // DBに保存し、実IDに差し替え
+      const {data, error} = await supabase.from("tasks")
+        .insert({text, assignee, start_key:startDate, end_key:endDate, color:selectedColor, done:false})
+        .select()
+        .single()
+
+      if (!error && data) {
+        // 仮IDを実IDに差し替え
+        setTasks(prev => prev.map(t => t.id===tempId ? {...data, done:data.done||false} : t))
+      } else {
+        // 失敗したら仮タスクを削除
+        setTasks(prev => prev.filter(t => t.id!==tempId))
+      }
     }
   }, [taskText, companyInput, personInput, editId, startDate, endDate, selectedColor])
 
-  // ---- タスク削除 ----
+  // タスク削除
   const deleteTaskById = useCallback(async (id) => {
-    await supabase.from("tasks").delete().eq("id", id)
+    setTasks(prev => prev.filter(t => t.id!==id))
     setModalOpen(false)
     setPreviewTask(null)
+    await supabase.from("tasks").delete().eq("id", id)
   }, [])
 
-  // ---- ナビ計算 ----
-  const base      = addDays(baseStart, navOffset * 7)
-  const colDates  = Array.from({ length: viewDays }, (_, i) => addDays(base, i))
-  const headerMonth = `${colDates[0].getMonth() + 1}月〜${colDates[viewDays - 1].getMonth() + 1}月 工程表`
-  const navLabel    = `${colDates[0].getMonth() + 1}/${colDates[0].getDate()} 〜 ${colDates[viewDays - 1].getMonth() + 1}/${colDates[viewDays - 1].getDate()}`
+  // ナビ計算
+  const base      = addDays(baseStart, navOffset*7)
+  const colDates  = Array.from({length:viewDays}, (_,i) => addDays(base,i))
+  const headerMonth = `${colDates[0].getMonth()+1}月〜${colDates[viewDays-1].getMonth()+1}月 工程表`
+  const navLabel    = `${colDates[0].getMonth()+1}/${colDates[0].getDate()} 〜 ${colDates[viewDays-1].getMonth()+1}/${colDates[viewDays-1].getDate()}`
 
-  // ---- previewTask を tasks から最新に同期 ----
+  // ★ フィルター済みタスクを事前計算して子に渡す（関数を渡さない）
+  const filteredTasks = tasks.filter(t => {
+    if (filterName  && !(t.assignee||"").includes(filterName)) return false
+    if (filterColor && t.color!==filterColor)                   return false
+    return true
+  })
+
   const currentPreviewTask = previewTask
-    ? (tasks.find(t => t.id === previewTask.id) || previewTask)
+    ? (tasks.find(t => t.id===previewTask.id) || previewTask)
     : null
 
-  // ===================== レンダリング =====================
   return (
-    <div style={{ minHeight: "100vh", background: "#EDEAE3" }}>
-      {/* ヘッダー */}
+    <div style={{minHeight:"100vh", background:"#EDEAE3"}}>
       <div className="kh-header">
         <div>
           <div className="kh-htitle">CONSTRUCTION SCHEDULE</div>
           <div className="kh-hmonth">{headerMonth}</div>
           <div className="kh-hmode">● LIVE</div>
         </div>
-        {currentTab === "schedule" && (
+        {currentTab==="schedule" && (
           <div className="kh-day-btns">
-            {[7, 14, 28].map(n => (
+            {[7,14,28].map(n => (
               <button key={n} className="kh-day-btn"
                 style={{
-                  background: viewDays === n ? "#F5C200" : "rgba(255,255,255,0.15)",
-                  color: viewDays === n ? "#192536" : "#fff",
+                  background: viewDays===n ? "#F5C200" : "rgba(255,255,255,0.15)",
+                  color: viewDays===n ? "#192536" : "#fff",
                 }}
                 onClick={() => setViewDays(n)}
               >{n}日</button>
@@ -650,56 +680,53 @@ export default function App() {
         )}
       </div>
 
-      {/* タブ */}
       <div className="kh-tabs">
         {[
-          { id: "today",    label: "📅 今日" },
-          { id: "tomorrow", label: "📆 明日" },
-          { id: "schedule", label: "📋 工程表" },
+          {id:"today",    label:"📅 今日"},
+          {id:"tomorrow", label:"📆 明日"},
+          {id:"schedule", label:"📋 工程表"},
         ].map(tab => (
           <button key={tab.id}
-            className={`kh-tab${currentTab === tab.id ? " active" : ""}`}
+            className={`kh-tab${currentTab===tab.id?" active":""}`}
             onClick={() => setCurrentTab(tab.id)}
           >{tab.label}</button>
         ))}
       </div>
 
-      {/* フィルターバー */}
       <div className="kh-filter-bar">
         <input placeholder="🏢 担当で絞り込み" value={filterName}
-          onChange={e => setFilterName(e.target.value)} />
+          onChange={e => setFilterName(e.target.value)}/>
         <div className="kh-filter-chips">
           {COLORS.map(c => (
             <button key={c.id}
-              className={`kh-chip${filterColor === c.id ? " active" : ""}`}
-              style={filterColor === c.id ? { background: c.bg } : {}}
-              onClick={() => setFilterColor(filterColor === c.id ? "" : c.id)}
+              className={`kh-chip${filterColor===c.id?" active":""}`}
+              style={filterColor===c.id ? {background:c.bg} : {}}
+              onClick={() => setFilterColor(filterColor===c.id ? "" : c.id)}
             >{c.label}</button>
           ))}
         </div>
         <button className="kh-filter-clear"
-          onClick={() => { setFilterName(""); setFilterColor("") }}
+          onClick={() => {setFilterName("");setFilterColor("")}}
         >✕ クリア</button>
       </div>
 
-      {/* コンテンツ */}
-      {currentTab === "today" && (
-        <DayView which="today" tasks={tasks} taskMatchesFilter={taskMatchesFilter}
-          toggleDone={toggleDone} setPreviewTask={setPreviewTask} />
+      {currentTab==="today" && (
+        <DayView which="today" filteredTasks={filteredTasks}
+          toggleDone={toggleDone} setPreviewTask={setPreviewTask}/>
       )}
-      {currentTab === "tomorrow" && (
-        <DayView which="tomorrow" tasks={tasks} taskMatchesFilter={taskMatchesFilter}
-          toggleDone={toggleDone} setPreviewTask={setPreviewTask} />
+      {currentTab==="tomorrow" && (
+        <DayView which="tomorrow" filteredTasks={filteredTasks}
+          toggleDone={toggleDone} setPreviewTask={setPreviewTask}/>
       )}
-      {currentTab === "schedule" && (
+      {currentTab==="schedule" && (
         <ScheduleView
-          tasks={tasks} viewDays={viewDays} base={base} navLabel={navLabel} colDates={colDates}
-          taskMatchesFilter={taskMatchesFilter} toggleDone={toggleDone} deleteTaskById={deleteTaskById}
-          setNavOffset={setNavOffset} openModal={openModal} setPreviewTask={setPreviewTask} isMobile={isMobile}
+          filteredTasks={filteredTasks} viewDays={viewDays} base={base}
+          navLabel={navLabel} colDates={colDates} isMobile={isMobile}
+          toggleDone={toggleDone} deleteTaskById={deleteTaskById}
+          setNavOffset={setNavOffset} openModal={openModal} setPreviewTask={setPreviewTask}
         />
       )}
 
-      {/* プレビューカード */}
       {currentPreviewTask && (
         <PreviewCard
           task={currentPreviewTask}
@@ -709,7 +736,6 @@ export default function App() {
         />
       )}
 
-      {/* 編集モーダル */}
       {modalOpen && (
         <EditModal
           editId={editId}
@@ -720,8 +746,8 @@ export default function App() {
           endDate={endDate} setEndDate={setEndDate}
           selectedColor={selectedColor} setSelectedColor={setSelectedColor}
           assigneeHistory={assigneeHistory} setAssigneeHistory={setAssigneeHistory}
-          saveTask={saveTask} deleteTaskById={deleteTaskById} closeModal={closeModal}
-          taskTextRef={taskTextRef}
+          saveTask={saveTask} deleteTaskById={deleteTaskById}
+          closeModal={closeModal} taskTextRef={taskTextRef}
         />
       )}
     </div>
