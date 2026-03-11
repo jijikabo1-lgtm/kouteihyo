@@ -168,15 +168,15 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 `
 
 const DayView = memo(function DayView({ which, filteredTasks, toggleDone, setPreviewTask }) {
-  const targetDate = which === "tomorrow" ? addDays(now, 1) : now
+  const targetDate = which==="tomorrow" ? addDays(now,1) : now
   const targetKey  = toKey(targetDate)
-  const month = targetDate.getMonth()+1, date = targetDate.getDate(), dow = DAYS_JA[targetDate.getDay()]
-  const label = which === "tomorrow" ? "明日の作業" : "本日の作業"
-  const dayTasks = filteredTasks.filter(t => {
-    const s=parseKey(t.start_key), e=parseKey(t.end_key), target=parseKey(targetKey)
-    return target>=s && target<=e
+  const month=targetDate.getMonth()+1, date=targetDate.getDate(), dow=DAYS_JA[targetDate.getDay()]
+  const label = which==="tomorrow" ? "明日の作業" : "本日の作業"
+  const dayTasks = filteredTasks.filter(t=>{
+    const s=parseKey(t.start_key),e=parseKey(t.end_key),target=parseKey(targetKey)
+    return target>=s&&target<=e
   })
-  const doneCount = dayTasks.filter(t=>t.done).length
+  const doneCount=dayTasks.filter(t=>t.done).length
   return (
     <div className="kh-day-view">
       <div className="kh-dv-header">
@@ -460,10 +460,11 @@ export default function App() {
   const [startDate,setStartDate]             = useState("")
   const [endDate,setEndDate]                 = useState("")
 
-  const taskTextRef = useRef(null)
-  const isMobile = typeof window!=="undefined" && window.innerWidth<=768
+  const taskTextRef  = useRef(null)
+  const isMobile     = typeof window!=="undefined" && window.innerWidth<=768
+  // ★ リアルタイム購読を一時的に無効化するフラグ
+  const suppressRTRef = useRef(false)
 
-  // CSS注入
   useEffect(()=>{
     const style=document.createElement("style")
     style.setAttribute("data-kh","1")
@@ -472,22 +473,21 @@ export default function App() {
     return ()=>document.head.removeChild(style)
   },[])
 
-  // ★ 全件再取得関数（useRefで安定した参照を保持）
-  const reloadRef = useRef(null)
-  reloadRef.current = async () => {
-    const {data} = await supabase.from("tasks").select("*").order("start_key")
+  const loadTasks = useCallback(async()=>{
+    const {data}=await supabase.from("tasks").select("*").order("start_key")
     if(data) setTasks(data.map(t=>({...t,done:t.done||false})))
-  }
+  },[])
 
-  // Supabase 初期取得 + リアルタイム購読
   useEffect(()=>{
-    reloadRef.current()
-    const channel = supabase
+    loadTasks()
+    const channel=supabase
       .channel("tasks-rt")
       .on("postgres_changes",{event:"INSERT",schema:"public",table:"tasks"},()=>{
-        reloadRef.current()  // INSERTは全件再取得
+        // ★ suppressRTRef が true の間はリアルタイムINSERTを無視
+        if(!suppressRTRef.current) loadTasks()
       })
       .on("postgres_changes",{event:"UPDATE",schema:"public",table:"tasks"},({new:rec})=>{
+        if(suppressRTRef.current) return
         setTasks(prev=>prev.map(t=>t.id===rec.id?{...rec,done:rec.done||false}:t))
         setPreviewTask(prev=>prev&&prev.id===rec.id?{...rec,done:rec.done||false}:prev)
       })
@@ -496,9 +496,9 @@ export default function App() {
       })
       .subscribe()
     return ()=>supabase.removeChannel(channel)
-  },[])
+  },[loadTasks])
 
-  const toggleDone = useCallback(async(id)=>{
+  const toggleDone=useCallback(async(id)=>{
     const task=tasks.find(t=>t.id===id)
     if(!task) return
     const newDone=!task.done
@@ -507,7 +507,7 @@ export default function App() {
     await supabase.from("tasks").update({done:newDone}).eq("id",id)
   },[tasks])
 
-  const openModal = useCallback((dateKey,task=null)=>{
+  const openModal=useCallback((dateKey,task=null)=>{
     setEditId(task?task.id:null)
     setSelectedColor(task?task.color:"orange")
     setTaskText(task?task.text:"")
@@ -520,13 +520,12 @@ export default function App() {
     setTimeout(()=>taskTextRef.current?.focus(),80)
   },[])
 
-  const closeModal = useCallback(()=>setModalOpen(false),[])
+  const closeModal=useCallback(()=>setModalOpen(false),[])
 
-  // ★ saveTask：保存後に全件再取得
-  const saveTask = useCallback(async()=>{
+  const saveTask=useCallback(async()=>{
     const text=taskText.trim()
     if(!text) return
-    const company=companyInput.trim(), person=personInput.trim()
+    const company=companyInput.trim(),person=personInput.trim()
     const assignee=assigneeLabel(company,person)
     if(company||person){
       setAssigneeHistory(prev=>{
@@ -534,7 +533,11 @@ export default function App() {
         return exists?prev:[...prev,{company,person}]
       })
     }
+
+    // ★ リアルタイム購読を一時停止（2秒間）
+    suppressRTRef.current = true
     setModalOpen(false)
+
     if(editId){
       await supabase.from("tasks")
         .update({text,assignee,start_key:startDate,end_key:endDate,color:selectedColor})
@@ -543,31 +546,36 @@ export default function App() {
       await supabase.from("tasks")
         .insert({text,assignee,start_key:startDate,end_key:endDate,color:selectedColor,done:false})
     }
-    // 保存後に全件再取得（リアルタイム購読に頼らない）
-    await reloadRef.current()
-  },[taskText,companyInput,personInput,editId,startDate,endDate,selectedColor])
 
-  const deleteTaskById = useCallback(async(id)=>{
+    // 保存完了後に再取得
+    await loadTasks()
+
+    // ★ 2秒後にリアルタイム購読を再開
+    setTimeout(()=>{ suppressRTRef.current=false }, 2000)
+
+  },[taskText,companyInput,personInput,editId,startDate,endDate,selectedColor,loadTasks])
+
+  const deleteTaskById=useCallback(async(id)=>{
     setTasks(prev=>prev.filter(t=>t.id!==id))
     setModalOpen(false)
     setPreviewTask(null)
     await supabase.from("tasks").delete().eq("id",id)
   },[])
 
-  const base     = addDays(baseStart,navOffset*7)
-  const colDates = Array.from({length:viewDays},(_,i)=>addDays(base,i))
-  const headerMonth = `${colDates[0].getMonth()+1}月〜${colDates[viewDays-1].getMonth()+1}月 工程表`
-  const navLabel    = `${colDates[0].getMonth()+1}/${colDates[0].getDate()} 〜 ${colDates[viewDays-1].getMonth()+1}/${colDates[viewDays-1].getDate()}`
+  const base     =addDays(baseStart,navOffset*7)
+  const colDates =Array.from({length:viewDays},(_,i)=>addDays(base,i))
+  const headerMonth=`${colDates[0].getMonth()+1}月〜${colDates[viewDays-1].getMonth()+1}月 工程表`
+  const navLabel   =`${colDates[0].getMonth()+1}/${colDates[0].getDate()} 〜 ${colDates[viewDays-1].getMonth()+1}/${colDates[viewDays-1].getDate()}`
 
-  const filteredTasks = tasks.filter(t=>{
+  const filteredTasks=tasks.filter(t=>{
     if(filterName  && !(t.assignee||"").includes(filterName)) return false
     if(filterColor && t.color!==filterColor)                   return false
     return true
   })
 
-  const currentPreviewTask = previewTask
-    ? (tasks.find(t=>t.id===previewTask.id)||previewTask)
-    : null
+  const currentPreviewTask=previewTask
+    ?(tasks.find(t=>t.id===previewTask.id)||previewTask)
+    :null
 
   return (
     <div style={{minHeight:"100vh",background:"#EDEAE3"}}>
