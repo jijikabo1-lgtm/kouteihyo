@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, memo } from "react"
 import { supabase } from "./supabaseClient"
 
 // ===================== 定数 =====================
@@ -172,19 +172,8 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-preview-done-btn.is-done{background:#DCFCE7;border-color:#86EFAC;color:#16A34A}
 `
 
-// ===================== CSS注入（モジュールスコープで一度だけ） =====================
-let cssInjected = false
-function injectCSS() {
-  if (cssInjected) return
-  cssInjected = true
-  const style = document.createElement("style")
-  style.setAttribute("data-kh", "1")
-  style.textContent = CSS
-  document.head.appendChild(style)
-}
-
 // ===================== 今日・明日ビュー（外部コンポーネント） =====================
-const DayView = ({ which, tasks, taskMatchesFilter, toggleDone, setPreviewTask }) => {
+const DayView = memo(function DayView({ which, tasks, taskMatchesFilter, toggleDone, setPreviewTask }) {
   const targetDate = which === "tomorrow" ? addDays(now, 1) : now
   const targetKey  = toKey(targetDate)
   const month = targetDate.getMonth() + 1
@@ -242,20 +231,20 @@ const DayView = ({ which, tasks, taskMatchesFilter, toggleDone, setPreviewTask }
       )}
     </div>
   )
-}
+})
 
 // ===================== 工程表ビュー（外部コンポーネント） =====================
-const ScheduleView = ({
-  tasks, viewDays, base, colDates, navLabel, isMobile,
-  taskMatchesFilter, openModal, toggleDone, deleteTaskById, setPreviewTask,
-  setNavOffset,
-}) => {
+const ScheduleView = memo(function ScheduleView({
+  tasks, viewDays, base, navLabel, colDates,
+  taskMatchesFilter, toggleDone, deleteTaskById,
+  setNavOffset, openModal, setPreviewTask, isMobile
+}) {
   const filteredTasks = tasks.filter(taskMatchesFilter)
   const laidOut = layoutTasks(filteredTasks, viewDays, base)
   const maxLane = laidOut.reduce((m, t) => Math.max(m, t.lane), -1)
-  const LANE_H = 26
-  const GRID_H = Math.max((maxLane + 1) * LANE_H + 8, 56)
-  const weeks = []
+  const LANE_H  = 26
+  const GRID_H  = Math.max((maxLane + 1) * LANE_H + 8, 56)
+  const weeks   = []
   for (let i = 0; i < viewDays; i += 7) weeks.push({ wo: i, days: colDates.slice(i, i + 7) })
 
   return (
@@ -295,13 +284,17 @@ const ScheduleView = ({
                       style={{
                         background: date.getDay() === 0 ? "rgba(200,0,0,0.04)" : date.getDay() === 6 ? "rgba(0,0,200,0.04)" : "transparent",
                         borderRight: di === wLen - 1 ? "none" : undefined,
-                      }} />
+                      }}
+                    />
                   ))}
                 </div>
                 {weekTasks.map(t => {
-                  const c = COLORS.find(x => x.id === t.color) || COLORS[0]
-                  const ls = Math.max(t.col - wo, 0), le = Math.min(t.endCol - wo, wLen - 1), span = le - ls + 1
-                  const sh = t.col >= wo, eh = t.endCol < wo + wLen
+                  const c  = COLORS.find(x => x.id === t.color) || COLORS[0]
+                  const ls = Math.max(t.col - wo, 0)
+                  const le = Math.min(t.endCol - wo, wLen - 1)
+                  const span = le - ls + 1
+                  const sh = t.col >= wo
+                  const eh = t.endCol < wo + wLen
                   return (
                     <div key={t.id}
                       className={`kh-task-bar${t.done ? " done" : ""}`}
@@ -355,10 +348,10 @@ const ScheduleView = ({
       </div>
     </>
   )
-}
+})
 
 // ===================== プレビューカード（外部コンポーネント） =====================
-const PreviewCard = ({ task, onClose, toggleDone, openModal }) => {
+const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openModal }) {
   if (!task) return null
   const c = COLORS.find(x => x.id === task.color) || COLORS[0]
   const s = parseKey(task.start_key), e = parseKey(task.end_key)
@@ -416,19 +409,25 @@ const PreviewCard = ({ task, onClose, toggleDone, openModal }) => {
       </div>
     </div>
   )
-}
+})
 
 // ===================== 編集モーダル（外部コンポーネント） =====================
-const EditModal = ({
-  editId, taskText, setTaskText, companyInput, setCompanyInput,
-  personInput, setPersonInput, startDate, setStartDate, endDate, setEndDate,
-  selectedColor, setSelectedColor, assigneeHistory, setAssigneeHistory,
-  saveTask, deleteTaskById, onClose, taskTextRef,
-}) => {
+const EditModal = memo(function EditModal({
+  editId, taskText, setTaskText,
+  companyInput, setCompanyInput,
+  personInput, setPersonInput,
+  startDate, setStartDate,
+  endDate, setEndDate,
+  selectedColor, setSelectedColor,
+  assigneeHistory, setAssigneeHistory,
+  saveTask, deleteTaskById, closeModal,
+  taskTextRef
+}) {
   const isEdit = editId !== null
   const onStartChange = (v) => { setStartDate(v); if (v > endDate) setEndDate(v) }
+
   return (
-    <div className="kh-modal-bg" onClick={onClose}>
+    <div className="kh-modal-bg" onClick={closeModal}>
       <div className="kh-modal" onClick={e => e.stopPropagation()}>
         <div className="kh-modal-head">
           <div className="kh-modal-title">{isEdit ? "✏️ タスクを編集" : "📝 タスク追加"}</div>
@@ -453,4 +452,278 @@ const EditModal = ({
               <div className="kh-assignee-history">
                 {assigneeHistory.map((h, i) => (
                   <div key={i} className="kh-history-item">
-                    <button
+                    <button className="kh-history-name"
+                      onClick={() => { setCompanyInput(h.company || ""); setPersonInput(h.person || "") }}>
+                      {h.company && h.person ? `${h.company} ${h.person}` : h.company || h.person}
+                    </button>
+                    <button className="kh-history-del"
+                      onClick={() => setAssigneeHistory(prev => prev.filter((_, j) => j !== i))}>×</button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="kh-field-label" style={{ marginBottom: 8 }}>🏗 工種</div>
+        <div className="kh-color-btns">
+          {COLORS.map(c => (
+            <button key={c.id} className="kh-color-btn"
+              style={{
+                background: c.bg,
+                transform: selectedColor === c.id ? "scale(1.1)" : "none",
+                outline: selectedColor === c.id ? `3px solid ${c.bg}` : "none",
+                outlineOffset: 2,
+              }}
+              onClick={() => setSelectedColor(c.id)}
+            >🏗 {c.label}</button>
+          ))}
+        </div>
+        <div className="kh-date-row">
+          <div className="kh-date-col">
+            <div className="kh-field-label">📅 開始日</div>
+            <input type="date" className="kh-date-input" value={startDate}
+              onChange={e => onStartChange(e.target.value)} />
+          </div>
+          <div style={{ fontSize: 20, color: "#C8C3BA", paddingBottom: 8 }}>→</div>
+          <div className="kh-date-col">
+            <div className="kh-field-label">🏁 終了日</div>
+            <input type="date" className="kh-date-input" value={endDate}
+              onChange={e => setEndDate(e.target.value)} />
+          </div>
+        </div>
+        <button className="kh-save-btn" onClick={saveTask}>{isEdit ? "更新する" : "追加する"}</button>
+      </div>
+    </div>
+  )
+})
+
+// ===================== メインコンポーネント =====================
+export default function App() {
+  // ---- State ----
+  const [tasks, setTasks]                     = useState([])
+  const [navOffset, setNavOffset]             = useState(0)
+  const [viewDays, setViewDays]               = useState(14)
+  const [currentTab, setCurrentTab]           = useState("schedule")
+  const [filterName, setFilterName]           = useState("")
+  const [filterColor, setFilterColor]         = useState("")
+  const [previewTask, setPreviewTask]         = useState(null)
+  const [assigneeHistory, setAssigneeHistory] = useState([])
+
+  // モーダル用state
+  const [modalOpen, setModalOpen]         = useState(false)
+  const [editId, setEditId]               = useState(null)
+  const [selectedColor, setSelectedColor] = useState("orange")
+  const [taskText, setTaskText]           = useState("")
+  const [companyInput, setCompanyInput]   = useState("")
+  const [personInput, setPersonInput]     = useState("")
+  const [startDate, setStartDate]         = useState("")
+  const [endDate, setEndDate]             = useState("")
+
+  const taskTextRef = useRef(null)
+  const isMobile    = typeof window !== "undefined" && window.innerWidth <= 768
+
+  // ---- CSS注入 ----
+  useEffect(() => {
+    const style = document.createElement("style")
+    style.setAttribute("data-kh", "1")
+    style.textContent = CSS
+    document.head.appendChild(style)
+    return () => document.head.removeChild(style)
+  }, [])
+
+  // ---- Supabase リアルタイム購読 ----
+  useEffect(() => {
+    supabase.from("tasks").select("*").order("start_key").then(({ data }) => {
+      if (data) setTasks(data.map(t => ({ ...t, done: t.done || false })))
+    })
+    const channel = supabase
+      .channel("tasks-channel")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks" }, ({ new: rec }) => {
+        setTasks(prev => [...prev, { ...rec, done: rec.done || false }])
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks" }, ({ new: rec }) => {
+        setTasks(prev => prev.map(t => t.id === rec.id ? { ...rec, done: rec.done || false } : t))
+        setPreviewTask(prev => prev && prev.id === rec.id ? { ...rec, done: rec.done || false } : prev)
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks" }, ({ old: rec }) => {
+        setTasks(prev => prev.filter(t => t.id !== rec.id))
+      })
+      .subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [])
+
+  // ---- フィルター ----
+  const taskMatchesFilter = useCallback((t) => {
+    if (filterName  && !(t.assignee || "").includes(filterName)) return false
+    if (filterColor && t.color !== filterColor)                   return false
+    return true
+  }, [filterName, filterColor])
+
+  // ---- 完了トグル ----
+  const toggleDone = useCallback(async (id) => {
+    const task = tasks.find(t => t.id === id)
+    if (!task) return
+    const newDone = !task.done
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: newDone } : t))
+    setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: newDone } : prev)
+    await supabase.from("tasks").update({ done: newDone }).eq("id", id)
+  }, [tasks])
+
+  // ---- モーダルを開く ----
+  const openModal = useCallback((dateKey, task = null) => {
+    setEditId(task ? task.id : null)
+    setSelectedColor(task ? task.color : "orange")
+    setTaskText(task ? task.text : "")
+    setStartDate(task ? task.start_key : dateKey)
+    setEndDate(task ? task.end_key : dateKey)
+    const { company, person } = splitAssignee(task ? task.assignee : "")
+    setCompanyInput(company)
+    setPersonInput(person)
+    setModalOpen(true)
+    setTimeout(() => taskTextRef.current?.focus(), 80)
+  }, [])
+
+  // ---- モーダルを閉じる ----
+  const closeModal = useCallback(() => setModalOpen(false), [])
+
+  // ---- タスク保存 ----
+  const saveTask = useCallback(async () => {
+    const text = taskText.trim()
+    if (!text) return
+    const company  = companyInput.trim()
+    const person   = personInput.trim()
+    const assignee = assigneeLabel(company, person)
+    if (company || person) {
+      setAssigneeHistory(prev => {
+        const exists = prev.some(h => h.company === company && h.person === person)
+        return exists ? prev : [...prev, { company, person }]
+      })
+    }
+    setModalOpen(false)  // 先にモーダルを閉じる
+    if (editId) {
+      await supabase.from("tasks").update({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor }).eq("id", editId)
+    } else {
+      await supabase.from("tasks").insert({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, done: false })
+    }
+  }, [taskText, companyInput, personInput, editId, startDate, endDate, selectedColor])
+
+  // ---- タスク削除 ----
+  const deleteTaskById = useCallback(async (id) => {
+    await supabase.from("tasks").delete().eq("id", id)
+    setModalOpen(false)
+    setPreviewTask(null)
+  }, [])
+
+  // ---- ナビ計算 ----
+  const base      = addDays(baseStart, navOffset * 7)
+  const colDates  = Array.from({ length: viewDays }, (_, i) => addDays(base, i))
+  const headerMonth = `${colDates[0].getMonth() + 1}月〜${colDates[viewDays - 1].getMonth() + 1}月 工程表`
+  const navLabel    = `${colDates[0].getMonth() + 1}/${colDates[0].getDate()} 〜 ${colDates[viewDays - 1].getMonth() + 1}/${colDates[viewDays - 1].getDate()}`
+
+  // ---- previewTask を tasks から最新に同期 ----
+  const currentPreviewTask = previewTask
+    ? (tasks.find(t => t.id === previewTask.id) || previewTask)
+    : null
+
+  // ===================== レンダリング =====================
+  return (
+    <div style={{ minHeight: "100vh", background: "#EDEAE3" }}>
+      {/* ヘッダー */}
+      <div className="kh-header">
+        <div>
+          <div className="kh-htitle">CONSTRUCTION SCHEDULE</div>
+          <div className="kh-hmonth">{headerMonth}</div>
+          <div className="kh-hmode">● LIVE</div>
+        </div>
+        {currentTab === "schedule" && (
+          <div className="kh-day-btns">
+            {[7, 14, 28].map(n => (
+              <button key={n} className="kh-day-btn"
+                style={{
+                  background: viewDays === n ? "#F5C200" : "rgba(255,255,255,0.15)",
+                  color: viewDays === n ? "#192536" : "#fff",
+                }}
+                onClick={() => setViewDays(n)}
+              >{n}日</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* タブ */}
+      <div className="kh-tabs">
+        {[
+          { id: "today",    label: "📅 今日" },
+          { id: "tomorrow", label: "📆 明日" },
+          { id: "schedule", label: "📋 工程表" },
+        ].map(tab => (
+          <button key={tab.id}
+            className={`kh-tab${currentTab === tab.id ? " active" : ""}`}
+            onClick={() => setCurrentTab(tab.id)}
+          >{tab.label}</button>
+        ))}
+      </div>
+
+      {/* フィルターバー */}
+      <div className="kh-filter-bar">
+        <input placeholder="🏢 担当で絞り込み" value={filterName}
+          onChange={e => setFilterName(e.target.value)} />
+        <div className="kh-filter-chips">
+          {COLORS.map(c => (
+            <button key={c.id}
+              className={`kh-chip${filterColor === c.id ? " active" : ""}`}
+              style={filterColor === c.id ? { background: c.bg } : {}}
+              onClick={() => setFilterColor(filterColor === c.id ? "" : c.id)}
+            >{c.label}</button>
+          ))}
+        </div>
+        <button className="kh-filter-clear"
+          onClick={() => { setFilterName(""); setFilterColor("") }}
+        >✕ クリア</button>
+      </div>
+
+      {/* コンテンツ */}
+      {currentTab === "today" && (
+        <DayView which="today" tasks={tasks} taskMatchesFilter={taskMatchesFilter}
+          toggleDone={toggleDone} setPreviewTask={setPreviewTask} />
+      )}
+      {currentTab === "tomorrow" && (
+        <DayView which="tomorrow" tasks={tasks} taskMatchesFilter={taskMatchesFilter}
+          toggleDone={toggleDone} setPreviewTask={setPreviewTask} />
+      )}
+      {currentTab === "schedule" && (
+        <ScheduleView
+          tasks={tasks} viewDays={viewDays} base={base} navLabel={navLabel} colDates={colDates}
+          taskMatchesFilter={taskMatchesFilter} toggleDone={toggleDone} deleteTaskById={deleteTaskById}
+          setNavOffset={setNavOffset} openModal={openModal} setPreviewTask={setPreviewTask} isMobile={isMobile}
+        />
+      )}
+
+      {/* プレビューカード */}
+      {currentPreviewTask && (
+        <PreviewCard
+          task={currentPreviewTask}
+          onClose={() => setPreviewTask(null)}
+          toggleDone={toggleDone}
+          openModal={openModal}
+        />
+      )}
+
+      {/* 編集モーダル */}
+      {modalOpen && (
+        <EditModal
+          editId={editId}
+          taskText={taskText} setTaskText={setTaskText}
+          companyInput={companyInput} setCompanyInput={setCompanyInput}
+          personInput={personInput} setPersonInput={setPersonInput}
+          startDate={startDate} setStartDate={setStartDate}
+          endDate={endDate} setEndDate={setEndDate}
+          selectedColor={selectedColor} setSelectedColor={setSelectedColor}
+          assigneeHistory={assigneeHistory} setAssigneeHistory={setAssigneeHistory}
+          saveTask={saveTask} deleteTaskById={deleteTaskById} closeModal={closeModal}
+          taskTextRef={taskTextRef}
+        />
+      )}
+    </div>
+  )
+}
