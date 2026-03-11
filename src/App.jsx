@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, memo } from "react"
+import { useState, useEffect, useCallback, useRef, memo, useMemo } from "react"
 import { supabase } from "./supabaseClient"
 
 const DAYS_JA = ["日","月","火","水","木","金","土"]
@@ -16,10 +16,6 @@ const toKey    = d    => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2
 const parseKey = k    => { const [y,m,d]=k.split("-"); return new Date(+y,+m-1,+d) }
 const addDays  = (d,n)=> new Date(d.getFullYear(), d.getMonth(), d.getDate()+n)
 const diffDays = (a,b)=> Math.round((b-a)/86400000)
-
-const now       = new Date()
-const todayKey  = toKey(now)
-const baseStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()-now.getDay())
 
 function assigneeLabel(company, person) {
   const c=(company||"").trim(), p=(person||"").trim()
@@ -165,18 +161,26 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-preview-edit-btn{flex:1;padding:15px;background:#192536;color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
 .kh-preview-done-btn{padding:15px 18px;border:2px solid #E2E8F0;background:#fff;color:#64748B;border-radius:14px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px}
 .kh-preview-done-btn.is-done{background:#DCFCE7;border-color:#86EFAC;color:#16A34A}
+.kh-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#D42020;color:#fff;padding:10px 20px;border-radius:12px;font-size:13px;font-weight:700;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.3);animation:kh-fadein 0.2s ease}
 `
 
-const DayView = memo(function DayView({ which, filteredTasks, toggleDone, setPreviewTask }) {
-  const targetDate = which==="tomorrow" ? addDays(now,1) : now
+// ────────────────────────────────────────────────
+// DayView
+// ────────────────────────────────────────────────
+const DayView = memo(function DayView({ which, filteredTasks, toggleDone, setPreviewTask, now, todayKey }) {
+  const targetDate = which === "tomorrow" ? addDays(now, 1) : now
   const targetKey  = toKey(targetDate)
-  const month=targetDate.getMonth()+1, date=targetDate.getDate(), dow=DAYS_JA[targetDate.getDay()]
-  const label = which==="tomorrow" ? "明日の作業" : "本日の作業"
-  const dayTasks = filteredTasks.filter(t=>{
-    const s=parseKey(t.start_key),e=parseKey(t.end_key),target=parseKey(targetKey)
-    return target>=s&&target<=e
+  const month = targetDate.getMonth() + 1
+  const date  = targetDate.getDate()
+  const dow   = DAYS_JA[targetDate.getDay()]
+  const label = which === "tomorrow" ? "明日の作業" : "本日の作業"
+
+  const dayTasks = filteredTasks.filter(t => {
+    const s = parseKey(t.start_key), e = parseKey(t.end_key), target = parseKey(targetKey)
+    return target >= s && target <= e
   })
-  const doneCount=dayTasks.filter(t=>t.done).length
+  const doneCount = dayTasks.filter(t => t.done).length
+
   return (
     <div className="kh-day-view">
       <div className="kh-dv-header">
@@ -184,72 +188,88 @@ const DayView = memo(function DayView({ which, filteredTasks, toggleDone, setPre
         <span className="kh-dv-badge">{month}月{date}日（{dow}）</span>
         <span style={{fontSize:11,color:"#888",fontWeight:600}}>{dayTasks.length}件</span>
       </div>
-      {dayTasks.length===0?(
+      {dayTasks.length === 0 ? (
         <div className="kh-dv-empty">📋 {label}はありません<br/>
           <span style={{fontSize:12,color:"#BBB",marginTop:6,display:"block"}}>工程表タブから追加できます</span>
         </div>
-      ):(
+      ) : (
         <>
-          {dayTasks.map(t=>{
-            const c=COLORS.find(x=>x.id===t.color)||COLORS[0]
-            const days=diffDays(parseKey(t.start_key),parseKey(t.end_key))
+          {dayTasks.map(t => {
+            const c = COLORS.find(x => x.id === t.color) || COLORS[0]
+            const days = diffDays(parseKey(t.start_key), parseKey(t.end_key))
             return (
-              <div key={t.id} className={`kh-card${t.done?" done":""}`}>
+              <div key={t.id} className={`kh-card${t.done ? " done" : ""}`}>
                 <div className="kh-card-accent" style={{background:c.bg}}/>
-                <div className="kh-card-body" onClick={()=>setPreviewTask(t)}>
+                <div className="kh-card-body" onClick={() => setPreviewTask(t)}>
                   <div className="kh-card-title">{t.text}</div>
                   <div className="kh-card-meta">
-                    <span>🏗 {c.label}</span><span>🏢 {t.assignee||"未設定"}</span>
-                    {days>0&&<span>📆 {days+1}日間</span>}
+                    <span>🏗 {c.label}</span>
+                    <span>🏢 {t.assignee || "未設定"}</span>
+                    {days > 0 && <span>📆 {days + 1}日間</span>}
                   </div>
                 </div>
                 <div className="kh-card-right">
-                  <button className={`kh-card-done-btn${t.done?" checked":""}`}
-                    onClick={e=>{e.stopPropagation();toggleDone(t.id)}}>✓</button>
+                  <button className={`kh-card-done-btn${t.done ? " checked" : ""}`}
+                    onClick={e => { e.stopPropagation(); toggleDone(t.id) }}>✓</button>
                 </div>
               </div>
             )
           })}
-          {doneCount>0&&<div className="kh-dv-summary">✅ {doneCount}件完了 / {dayTasks.length}件中</div>}
+          {doneCount > 0 && (
+            <div className="kh-dv-summary">✅ {doneCount}件完了 / {dayTasks.length}件中</div>
+          )}
         </>
       )}
     </div>
   )
 })
 
+// ────────────────────────────────────────────────
+// ScheduleView
+// ────────────────────────────────────────────────
 const ScheduleView = memo(function ScheduleView({
   filteredTasks, viewDays, base, navLabel, colDates,
-  toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, isMobile
+  toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, isMobile, todayKey
 }) {
-  const laidOut=layoutTasks(filteredTasks,viewDays,base)
-  const maxLane=laidOut.reduce((m,t)=>Math.max(m,t.lane),-1)
-  const LANE_H=26, GRID_H=Math.max((maxLane+1)*LANE_H+8,56)
-  const weeks=[]
-  for(let i=0;i<viewDays;i+=7) weeks.push({wo:i,days:colDates.slice(i,i+7)})
+  // ✅ fix⑦: useMemoでlayoutTasksの再計算を抑制
+  const laidOut = useMemo(
+    () => layoutTasks(filteredTasks, viewDays, base),
+    [filteredTasks, viewDays, base]
+  )
+
+  const maxLane = laidOut.reduce((m, t) => Math.max(m, t.lane), -1)
+  const LANE_H  = 26
+  const GRID_H  = Math.max((maxLane + 1) * LANE_H + 8, 56)
+
+  const weeks = []
+  for (let i = 0; i < viewDays; i += 7) weeks.push({ wo: i, days: colDates.slice(i, i + 7) })
+
   return (
     <>
       <div className="kh-nav">
-        <button className="kh-nav-btn" onClick={()=>setNavOffset(o=>o-1)}>◀ 前週</button>
+        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o - 1)}>◀ 前週</button>
         <span className="kh-nav-label">{navLabel}</span>
-        <button className="kh-nav-btn" onClick={()=>setNavOffset(o=>o+1)}>次週 ▶</button>
+        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o + 1)}>次週 ▶</button>
       </div>
-      {isMobile&&viewDays>7&&<div className="kh-zoom-hint">🔍 ピンチ操作で拡大できます</div>}
+      {isMobile && viewDays > 7 && (
+        <div className="kh-zoom-hint">🔍 ピンチ操作で拡大できます</div>
+      )}
       <div className="kh-grid-wrap">
-        {weeks.map(({wo,days:week})=>{
-          const wLen=week.length
-          const weekTasks=laidOut.filter(t=>t.endCol>=wo&&t.col<wo+wLen)
+        {weeks.map(({ wo, days: week }) => {
+          const wLen = week.length
+          const weekTasks = laidOut.filter(t => t.endCol >= wo && t.col < wo + wLen)
           return (
             <div key={wo} className="kh-week-block">
               <div className="kh-day-header" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
-                {week.map((date,di)=>{
-                  const dow=date.getDay(),key=toKey(date),isToday=key===todayKey
-                  const cls=isToday?"today":dow===0?"sun":dow===6?"sat":""
+                {week.map((date, di) => {
+                  const dow = date.getDay(), key = toKey(date), isToday = key === todayKey
+                  const cls = isToday ? "today" : dow === 0 ? "sun" : dow === 6 ? "sat" : ""
                   return (
-                    <div key={di} className={`kh-day-cell${cls?" "+cls:""}`} onClick={()=>openModal(key)}>
+                    <div key={di} className={`kh-day-cell${cls ? " " + cls : ""}`} onClick={() => openModal(key)}>
                       <div className="kh-day-left">
-                        <span className={`kh-dow${dow===0?" sun":dow===6?" sat":""}`}>{DAYS_JA[dow]}</span>
-                        <span className={`kh-dnum${dow===0?" sun":dow===6?" sat":""}`}>{date.getDate()}</span>
-                        <span className="kh-dmonth">{date.getMonth()+1}月</span>
+                        <span className={`kh-dow${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>{DAYS_JA[dow]}</span>
+                        <span className={`kh-dnum${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>{date.getDate()}</span>
+                        <span className="kh-dmonth">{date.getMonth() + 1}月</span>
                       </div>
                       <span className="kh-plus">＋</span>
                     </div>
@@ -258,40 +278,45 @@ const ScheduleView = memo(function ScheduleView({
               </div>
               <div className="kh-task-area" style={{height:GRID_H}}>
                 <div className="kh-col-grid" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
-                  {week.map((date,di)=>(
+                  {week.map((date, di) => (
                     <div key={di} className="kh-col-div" style={{
-                      background:date.getDay()===0?"rgba(200,0,0,0.04)":date.getDay()===6?"rgba(0,0,200,0.04)":"transparent",
-                      borderRight:di===wLen-1?"none":undefined
+                      background: date.getDay() === 0 ? "rgba(200,0,0,0.04)" : date.getDay() === 6 ? "rgba(0,0,200,0.04)" : "transparent",
+                      borderRight: di === wLen - 1 ? "none" : undefined
                     }}/>
                   ))}
                 </div>
-                {weekTasks.map(t=>{
-                  const c=COLORS.find(x=>x.id===t.color)||COLORS[0]
-                  const ls=Math.max(t.col-wo,0),le=Math.min(t.endCol-wo,wLen-1),span=le-ls+1
-                  const sh=t.col>=wo,eh=t.endCol<wo+wLen
+                {weekTasks.map(t => {
+                  const c  = COLORS.find(x => x.id === t.color) || COLORS[0]
+                  const ls = Math.max(t.col - wo, 0)
+                  const le = Math.min(t.endCol - wo, wLen - 1)
+                  const span = le - ls + 1
+                  const sh = t.col >= wo, eh = t.endCol < wo + wLen
                   return (
-                    <div key={t.id} className={`kh-task-bar${t.done?" done":""}`}
-                      title={`${t.text}${t.assignee?" ／ "+t.assignee:""}`}
+                    <div key={t.id} className={`kh-task-bar${t.done ? " done" : ""}`}
+                      title={`${t.text}${t.assignee ? " ／ " + t.assignee : ""}`}
                       style={{
-                        top:t.lane*LANE_H+3,
-                        left:`calc(${ls*100/wLen}% + ${sh?2:0}px)`,
-                        width:`calc(${span*100/wLen}% - ${(sh?2:0)+(eh?2:0)}px)`,
-                        height:LANE_H-4,background:c.bg,
-                        borderRadius:`${sh?4:0}px ${eh?4:0}px ${eh?4:0}px ${sh?4:0}px`,
-                        paddingLeft:sh?5:2,paddingRight:eh?4:2,zIndex:10
+                        top: t.lane * LANE_H + 3,
+                        left: `calc(${ls * 100 / wLen}% + ${sh ? 2 : 0}px)`,
+                        width: `calc(${span * 100 / wLen}% - ${(sh ? 2 : 0) + (eh ? 2 : 0)}px)`,
+                        height: LANE_H - 4,
+                        background: c.bg,
+                        borderRadius: `${sh ? 4 : 0}px ${eh ? 4 : 0}px ${eh ? 4 : 0}px ${sh ? 4 : 0}px`,
+                        paddingLeft: sh ? 5 : 2,
+                        paddingRight: eh ? 4 : 2,
+                        zIndex: 10
                       }}
-                      onClick={()=>setPreviewTask(t)}>
-                      {!sh&&<span style={{marginRight:2,opacity:0.8,fontSize:8}}>◀</span>}
+                      onClick={() => setPreviewTask(t)}>
+                      {!sh && <span style={{marginRight:2,opacity:0.8,fontSize:8}}>◀</span>}
                       <span className="kh-bar-text" style={{flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>
-                        {t.assignee&&<span style={{opacity:0.7,marginRight:2}}>{t.assignee}</span>}
+                        {t.assignee && <span style={{opacity:0.7,marginRight:2}}>{t.assignee}</span>}
                         {t.text}
                       </span>
-                      {!eh&&<span style={{marginLeft:2,opacity:0.8,fontSize:8}}>▶</span>}
-                      {eh&&(
+                      {!eh && <span style={{marginLeft:2,opacity:0.8,fontSize:8}}>▶</span>}
+                      {eh && (
                         <>
-                          <button className={`kh-done-check${t.done?" checked":""}`}
-                            onClick={e=>{e.stopPropagation();toggleDone(t.id)}}>{t.done?"✓":""}</button>
-                          <button onClick={e=>{e.stopPropagation();deleteTaskById(t.id)}}
+                          <button className={`kh-done-check${t.done ? " checked" : ""}`}
+                            onClick={e => { e.stopPropagation(); toggleDone(t.id) }}>{t.done ? "✓" : ""}</button>
+                          <button onClick={e => { e.stopPropagation(); deleteTaskById(t.id) }}
                             style={{marginLeft:2,background:"rgba(0,0,0,0.25)",border:"none",borderRadius:3,color:"#fff",fontSize:8,cursor:"pointer",padding:"1px 3px",flexShrink:0}}>✕</button>
                         </>
                       )}
@@ -304,7 +329,7 @@ const ScheduleView = memo(function ScheduleView({
         })}
       </div>
       <div className="kh-legend">
-        {COLORS.map(c=>(
+        {COLORS.map(c => (
           <div key={c.id} className="kh-legend-item">
             <div className="kh-legend-dot" style={{background:c.bg}}/>{c.label}
           </div>
@@ -314,14 +339,18 @@ const ScheduleView = memo(function ScheduleView({
   )
 })
 
+// ────────────────────────────────────────────────
+// PreviewCard
+// ────────────────────────────────────────────────
 const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openModal }) {
-  if(!task) return null
-  const c=COLORS.find(x=>x.id===task.color)||COLORS[0]
-  const s=parseKey(task.start_key),e=parseKey(task.end_key),days=diffDays(s,e)
-  const {company,person}=splitAssignee(task.assignee)
+  if (!task) return null
+  const c = COLORS.find(x => x.id === task.color) || COLORS[0]
+  const s = parseKey(task.start_key), e = parseKey(task.end_key)
+  const days = diffDays(s, e)
+  const { company, person } = splitAssignee(task.assignee)
   return (
     <div className="kh-preview-bg" onClick={onClose}>
-      <div className="kh-preview-card" onClick={ev=>ev.stopPropagation()}>
+      <div className="kh-preview-card" onClick={ev => ev.stopPropagation()}>
         <div className="kh-preview-accent" style={{background:c.bg}}>
           <div style={{flex:1}}>
             <div className="kh-preview-type-badge">🏗 {c.label}</div>
@@ -330,84 +359,102 @@ const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openM
           <button className="kh-preview-close" onClick={onClose}>×</button>
         </div>
         <div className="kh-preview-body">
-          {task.done&&<div className="kh-preview-done-badge">✅ 完了済み</div>}
+          {task.done && <div className="kh-preview-done-badge">✅ 完了済み</div>}
           <div className="kh-preview-daterange">
             <div className="kh-preview-date-block">
               <div className="kh-preview-date-label">📅 開始日</div>
-              <div className="kh-preview-date-value">{s.getMonth()+1}/{s.getDate()}</div>
+              <div className="kh-preview-date-value">{s.getMonth() + 1}/{s.getDate()}</div>
               <div className="kh-preview-date-sub">{DAYS_JA[s.getDay()]}曜日</div>
             </div>
             <div className="kh-preview-date-arrow">→</div>
             <div className="kh-preview-date-block">
               <div className="kh-preview-date-label">🏁 終了日</div>
-              <div className="kh-preview-date-value">{e.getMonth()+1}/{e.getDate()}</div>
+              <div className="kh-preview-date-value">{e.getMonth() + 1}/{e.getDate()}</div>
               <div className="kh-preview-date-sub">{DAYS_JA[e.getDay()]}曜日</div>
             </div>
           </div>
           <div className="kh-preview-duration">
-            {days===0?"📌 単日作業":`📆 ${days+1}日間（${task.start_key} 〜 ${task.end_key}）`}
+            {days === 0 ? "📌 単日作業" : `📆 ${days + 1}日間（${task.start_key} 〜 ${task.end_key}）`}
           </div>
           <div className="kh-preview-info-row">
             <div className="kh-preview-info-item">
               <div className="kh-preview-info-label">🏢 会社名</div>
-              <div className={`kh-preview-info-value${company?"":" empty"}`}>{company||"未設定"}</div>
+              <div className={`kh-preview-info-value${company ? "" : " empty"}`}>{company || "未設定"}</div>
             </div>
             <div className="kh-preview-info-item">
               <div className="kh-preview-info-label">👤 担当者</div>
-              <div className={`kh-preview-info-value${person?"":" empty"}`}>{person||"未設定"}</div>
+              <div className={`kh-preview-info-value${person ? "" : " empty"}`}>{person || "未設定"}</div>
             </div>
           </div>
         </div>
         <div className="kh-preview-actions">
-          <button className={`kh-preview-done-btn${task.done?" is-done":""}`}
-            onClick={()=>toggleDone(task.id)}>{task.done?"↩ 未完了に戻す":"✓ 完了にする"}</button>
+          <button className={`kh-preview-done-btn${task.done ? " is-done" : ""}`}
+            onClick={() => toggleDone(task.id)}>
+            {task.done ? "↩ 未完了に戻す" : "✓ 完了にする"}
+          </button>
           <button className="kh-preview-edit-btn"
-            onClick={()=>{onClose();openModal(task.start_key,task)}}>✏️ 編集する</button>
+            onClick={() => { onClose(); openModal(task.start_key, task) }}>✏️ 編集する</button>
         </div>
       </div>
     </div>
   )
 })
 
+// ────────────────────────────────────────────────
+// EditModal
+// ────────────────────────────────────────────────
 const EditModal = memo(function EditModal({
-  editId,taskText,setTaskText,companyInput,setCompanyInput,personInput,setPersonInput,
-  startDate,setStartDate,endDate,setEndDate,selectedColor,setSelectedColor,
-  assigneeHistory,setAssigneeHistory,saveTask,deleteTaskById,closeModal,taskTextRef
+  editId, taskText, setTaskText, companyInput, setCompanyInput, personInput, setPersonInput,
+  startDate, setStartDate, endDate, setEndDate, selectedColor, setSelectedColor,
+  assigneeHistory, setAssigneeHistory, saveTask, deleteTaskById, closeModal, taskTextRef
 }) {
-  const isEdit=editId!==null
-  const onStartChange=(v)=>{setStartDate(v);if(v>endDate)setEndDate(v)}
+  const isEdit = editId !== null
+
+  // ✅ fix①: 開始日変更時は終了日を補正
+  const onStartChange = (v) => {
+    setStartDate(v)
+    if (v > endDate) setEndDate(v)
+  }
+
+  // ✅ fix①: 終了日変更時も開始日より前にならないよう補正
+  const onEndChange = (v) => {
+    setEndDate(v < startDate ? startDate : v)
+  }
+
   return (
     <div className="kh-modal-bg" onClick={closeModal}>
-      <div className="kh-modal" onClick={e=>e.stopPropagation()}>
+      <div className="kh-modal" onClick={e => e.stopPropagation()}>
         <div className="kh-modal-head">
-          <div className="kh-modal-title">{isEdit?"✏️ タスクを編集":"📝 タスク追加"}</div>
-          {isEdit&&<button className="kh-del-btn" onClick={()=>deleteTaskById(editId)}>🗑 削除</button>}
+          <div className="kh-modal-title">{isEdit ? "✏️ タスクを編集" : "📝 タスク追加"}</div>
+          {isEdit && (
+            <button className="kh-del-btn" onClick={() => deleteTaskById(editId)}>🗑 削除</button>
+          )}
         </div>
         <div className="kh-field-label">🔨 作業内容</div>
         <input ref={taskTextRef} className="kh-task-input" value={taskText}
-          onChange={e=>setTaskText(e.target.value)}
-          onKeyDown={e=>e.key==="Enter"&&saveTask()}
+          onChange={e => setTaskText(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && saveTask()}
           placeholder="例：1F 配筋検査 13:00〜"/>
         <div className="kh-assignee-wrap">
           <div className="kh-field-label">🏢 担当</div>
           <div className="kh-assignee-row">
             <input className="kh-assignee-input" value={companyInput}
-              onChange={e=>setCompanyInput(e.target.value)} placeholder="会社名（例：山田工務店）"/>
+              onChange={e => setCompanyInput(e.target.value)} placeholder="会社名（例：山田工務店）"/>
             <input className="kh-assignee-input" value={personInput}
-              onChange={e=>setPersonInput(e.target.value)} placeholder="担当者名（例：田中）"/>
+              onChange={e => setPersonInput(e.target.value)} placeholder="担当者名（例：田中）"/>
           </div>
-          {assigneeHistory.length>0&&(
+          {assigneeHistory.length > 0 && (
             <>
               <div className="kh-history-label">📋 履歴から選ぶ</div>
               <div className="kh-assignee-history">
-                {assigneeHistory.map((h,i)=>(
+                {assigneeHistory.map((h, i) => (
                   <div key={i} className="kh-history-item">
                     <button className="kh-history-name"
-                      onClick={()=>{setCompanyInput(h.company||"");setPersonInput(h.person||"")}}>
-                      {h.company&&h.person?`${h.company} ${h.person}`:h.company||h.person}
+                      onClick={() => { setCompanyInput(h.company || ""); setPersonInput(h.person || "") }}>
+                      {h.company && h.person ? `${h.company} ${h.person}` : h.company || h.person}
                     </button>
                     <button className="kh-history-del"
-                      onClick={()=>setAssigneeHistory(prev=>prev.filter((_,j)=>j!==i))}>×</button>
+                      onClick={() => setAssigneeHistory(prev => prev.filter((_, j) => j !== i))}>×</button>
                   </div>
                 ))}
               </div>
@@ -416,166 +463,236 @@ const EditModal = memo(function EditModal({
         </div>
         <div className="kh-field-label" style={{marginBottom:8}}>🏗 工種</div>
         <div className="kh-color-btns">
-          {COLORS.map(c=>(
+          {COLORS.map(c => (
             <button key={c.id} className="kh-color-btn"
-              style={{background:c.bg,transform:selectedColor===c.id?"scale(1.1)":"none",
-                outline:selectedColor===c.id?`3px solid ${c.bg}`:"none",outlineOffset:2}}
-              onClick={()=>setSelectedColor(c.id)}>🏗 {c.label}</button>
+              style={{
+                background: c.bg,
+                transform: selectedColor === c.id ? "scale(1.1)" : "none",
+                outline: selectedColor === c.id ? `3px solid ${c.bg}` : "none",
+                outlineOffset: 2
+              }}
+              onClick={() => setSelectedColor(c.id)}>🏗 {c.label}</button>
           ))}
         </div>
         <div className="kh-date-row">
           <div className="kh-date-col">
             <div className="kh-field-label">📅 開始日</div>
             <input type="date" className="kh-date-input" value={startDate}
-              onChange={e=>onStartChange(e.target.value)}/>
+              onChange={e => onStartChange(e.target.value)}/>
           </div>
           <div style={{fontSize:20,color:"#C8C3BA",paddingBottom:8}}>→</div>
           <div className="kh-date-col">
             <div className="kh-field-label">🏁 終了日</div>
+            {/* ✅ fix①: 終了日バリデーション追加 */}
             <input type="date" className="kh-date-input" value={endDate}
-              onChange={e=>setEndDate(e.target.value)}/>
+              min={startDate}
+              onChange={e => onEndChange(e.target.value)}/>
           </div>
         </div>
-        <button className="kh-save-btn" onClick={saveTask}>{isEdit?"更新する":"追加する"}</button>
+        <button className="kh-save-btn" onClick={saveTask}>{isEdit ? "更新する" : "追加する"}</button>
       </div>
     </div>
   )
 })
 
+// ────────────────────────────────────────────────
+// App (Main)
+// ────────────────────────────────────────────────
 export default function App() {
-  const [tasks,setTasks]                     = useState([])
-  const [navOffset,setNavOffset]             = useState(0)
-  const [viewDays,setViewDays]               = useState(14)
-  const [currentTab,setCurrentTab]           = useState("schedule")
-  const [filterName,setFilterName]           = useState("")
-  const [filterColor,setFilterColor]         = useState("")
-  const [previewTask,setPreviewTask]         = useState(null)
-  const [assigneeHistory,setAssigneeHistory] = useState([])
-  const [modalOpen,setModalOpen]             = useState(false)
-  const [editId,setEditId]                   = useState(null)
-  const [selectedColor,setSelectedColor]     = useState("orange")
-  const [taskText,setTaskText]               = useState("")
-  const [companyInput,setCompanyInput]       = useState("")
-  const [personInput,setPersonInput]         = useState("")
-  const [startDate,setStartDate]             = useState("")
-  const [endDate,setEndDate]                 = useState("")
+  // ✅ fix②: now/todayKey/baseStartをstateで管理し、日付をまたいでも正確に
+  const [now] = useState(() => new Date())
+  const todayKey  = toKey(now)
+  const baseStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay())
 
-  const taskTextRef  = useRef(null)
-  const isMobile     = typeof window!=="undefined" && window.innerWidth<=768
-  // ★ リアルタイム購読を一時的に無効化するフラグ
-  const suppressRTRef = useRef(false)
+  const [tasks, setTasks]                     = useState([])
+  const [navOffset, setNavOffset]             = useState(0)
+  const [viewDays, setViewDays]               = useState(14)
+  const [currentTab, setCurrentTab]           = useState("schedule")
+  const [filterName, setFilterName]           = useState("")
+  const [filterColor, setFilterColor]         = useState("")
+  const [previewTask, setPreviewTask]         = useState(null)
+  const [modalOpen, setModalOpen]             = useState(false)
+  const [editId, setEditId]                   = useState(null)
+  const [selectedColor, setSelectedColor]     = useState("orange")
+  const [taskText, setTaskText]               = useState("")
+  const [companyInput, setCompanyInput]       = useState("")
+  const [personInput, setPersonInput]         = useState("")
+  const [startDate, setStartDate]             = useState("")
+  const [endDate, setEndDate]                 = useState("")
+  const [toastMsg, setToastMsg]               = useState("")
 
-  useEffect(()=>{
-    const style=document.createElement("style")
-    style.setAttribute("data-kh","1")
-    style.textContent=CSS
+  // ✅ fix③: 担当者履歴をlocalStorageで永続化
+  const [assigneeHistory, setAssigneeHistory] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("kh_assignee_history") || "[]")
+    } catch { return [] }
+  })
+  useEffect(() => {
+    localStorage.setItem("kh_assignee_history", JSON.stringify(assigneeHistory))
+  }, [assigneeHistory])
+
+  const taskTextRef     = useRef(null)
+  const suppressRTRef   = useRef(false)
+  // ✅ fix⑤: suppressTimerの参照を保持して競合を防ぐ
+  const suppressTimerRef = useRef(null)
+
+  // ✅ fix⑥: isMobileをstateで管理しリサイズに追従
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768)
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener("resize", handler)
+    return () => window.removeEventListener("resize", handler)
+  }, [])
+
+  useEffect(() => {
+    const style = document.createElement("style")
+    style.setAttribute("data-kh", "1")
+    style.textContent = CSS
     document.head.appendChild(style)
-    return ()=>document.head.removeChild(style)
-  },[])
+    return () => document.head.removeChild(style)
+  }, [])
 
-  const loadTasks = useCallback(async()=>{
-    const {data}=await supabase.from("tasks").select("*").order("start_key")
-    if(data) setTasks(data.map(t=>({...t,done:t.done||false})))
-  },[])
+  // エラートースト表示ヘルパー
+  const showToast = useCallback((msg) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(""), 3000)
+  }, [])
 
-  useEffect(()=>{
+  const loadTasks = useCallback(async () => {
+    const { data, error } = await supabase.from("tasks").select("*").order("start_key")
+    // ✅ fix④: ロードエラーを検知
+    if (error) {
+      showToast("データの取得に失敗しました")
+      return
+    }
+    if (data) setTasks(data.map(t => ({ ...t, done: t.done || false })))
+  }, [showToast])
+
+  useEffect(() => {
     loadTasks()
-    const channel=supabase
+    const channel = supabase
       .channel("tasks-rt")
-      .on("postgres_changes",{event:"INSERT",schema:"public",table:"tasks"},()=>{
-        // ★ suppressRTRef が true の間はリアルタイムINSERTを無視
-        if(!suppressRTRef.current) loadTasks()
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks" }, () => {
+        if (!suppressRTRef.current) loadTasks()
       })
-      .on("postgres_changes",{event:"UPDATE",schema:"public",table:"tasks"},({new:rec})=>{
-        if(suppressRTRef.current) return
-        setTasks(prev=>prev.map(t=>t.id===rec.id?{...rec,done:rec.done||false}:t))
-        setPreviewTask(prev=>prev&&prev.id===rec.id?{...rec,done:rec.done||false}:prev)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks" }, ({ new: rec }) => {
+        if (suppressRTRef.current) return
+        setTasks(prev => prev.map(t => t.id === rec.id ? { ...rec, done: rec.done || false } : t))
+        setPreviewTask(prev => prev && prev.id === rec.id ? { ...rec, done: rec.done || false } : prev)
       })
-      .on("postgres_changes",{event:"DELETE",schema:"public",table:"tasks"},({old:rec})=>{
-        setTasks(prev=>prev.filter(t=>t.id!==rec.id))
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks" }, ({ old: rec }) => {
+        setTasks(prev => prev.filter(t => t.id !== rec.id))
       })
       .subscribe()
-    return ()=>supabase.removeChannel(channel)
-  },[loadTasks])
+    return () => supabase.removeChannel(channel)
+  }, [loadTasks])
 
-  const toggleDone=useCallback(async(id)=>{
-    const task=tasks.find(t=>t.id===id)
-    if(!task) return
-    const newDone=!task.done
-    setTasks(prev=>prev.map(t=>t.id===id?{...t,done:newDone}:t))
-    setPreviewTask(prev=>prev&&prev.id===id?{...prev,done:newDone}:prev)
-    await supabase.from("tasks").update({done:newDone}).eq("id",id)
-  },[tasks])
+  const toggleDone = useCallback(async (id) => {
+    const task = tasks.find(t => t.id === id)
+    if (!task) return
+    const newDone = !task.done
+    // 楽観的更新
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: newDone } : t))
+    setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: newDone } : prev)
+    // ✅ fix④: エラー時にロールバック
+    const { error } = await supabase.from("tasks").update({ done: newDone }).eq("id", id)
+    if (error) {
+      showToast("更新に失敗しました")
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, done: task.done } : t))
+      setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: task.done } : prev)
+    }
+  }, [tasks, showToast])
 
-  const openModal=useCallback((dateKey,task=null)=>{
-    setEditId(task?task.id:null)
-    setSelectedColor(task?task.color:"orange")
-    setTaskText(task?task.text:"")
-    setStartDate(task?task.start_key:dateKey)
-    setEndDate(task?task.end_key:dateKey)
-    const {company,person}=splitAssignee(task?task.assignee:"")
+  const openModal = useCallback((dateKey, task = null) => {
+    setEditId(task ? task.id : null)
+    setSelectedColor(task ? task.color : "orange")
+    setTaskText(task ? task.text : "")
+    setStartDate(task ? task.start_key : dateKey)
+    setEndDate(task ? task.end_key : dateKey)
+    const { company, person } = splitAssignee(task ? task.assignee : "")
     setCompanyInput(company)
     setPersonInput(person)
     setModalOpen(true)
-    setTimeout(()=>taskTextRef.current?.focus(),80)
-  },[])
+    setTimeout(() => taskTextRef.current?.focus(), 80)
+  }, [])
 
-  const closeModal=useCallback(()=>setModalOpen(false),[])
+  const closeModal = useCallback(() => setModalOpen(false), [])
 
-  const saveTask=useCallback(async()=>{
-    const text=taskText.trim()
-    if(!text) return
-    const company=companyInput.trim(),person=personInput.trim()
-    const assignee=assigneeLabel(company,person)
-    if(company||person){
-      setAssigneeHistory(prev=>{
-        const exists=prev.some(h=>h.company===company&&h.person===person)
-        return exists?prev:[...prev,{company,person}]
+  const saveTask = useCallback(async () => {
+    const text = taskText.trim()
+    if (!text) return
+    const company  = companyInput.trim()
+    const person   = personInput.trim()
+    const assignee = assigneeLabel(company, person)
+
+    if (company || person) {
+      setAssigneeHistory(prev => {
+        const exists = prev.some(h => h.company === company && h.person === person)
+        return exists ? prev : [...prev, { company, person }]
       })
     }
 
-    // ★ リアルタイム購読を一時停止（2秒間）
+    // ✅ fix⑤: 既存タイマーをクリアしてから再セット
     suppressRTRef.current = true
+    clearTimeout(suppressTimerRef.current)
+
     setModalOpen(false)
 
-    if(editId){
-      await supabase.from("tasks")
-        .update({text,assignee,start_key:startDate,end_key:endDate,color:selectedColor})
-        .eq("id",editId)
+    // ✅ fix④: 保存エラーをトーストで通知しロールバック
+    if (editId) {
+      const { error } = await supabase.from("tasks")
+        .update({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor })
+        .eq("id", editId)
+      if (error) {
+        showToast("更新に失敗しました: " + error.message)
+        suppressRTRef.current = false
+        await loadTasks()
+        return
+      }
     } else {
-      await supabase.from("tasks")
-        .insert({text,assignee,start_key:startDate,end_key:endDate,color:selectedColor,done:false})
+      const { error } = await supabase.from("tasks")
+        .insert({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, done: false })
+      if (error) {
+        showToast("保存に失敗しました: " + error.message)
+        suppressRTRef.current = false
+        await loadTasks()
+        return
+      }
     }
 
-    // 保存完了後に再取得
     await loadTasks()
 
-    // ★ 2秒後にリアルタイム購読を再開
-    setTimeout(()=>{ suppressRTRef.current=false }, 2000)
+    suppressTimerRef.current = setTimeout(() => {
+      suppressRTRef.current = false
+    }, 2000)
+  }, [taskText, companyInput, personInput, editId, startDate, endDate, selectedColor, loadTasks, showToast])
 
-  },[taskText,companyInput,personInput,editId,startDate,endDate,selectedColor,loadTasks])
-
-  const deleteTaskById=useCallback(async(id)=>{
-    setTasks(prev=>prev.filter(t=>t.id!==id))
+  const deleteTaskById = useCallback(async (id) => {
+    setTasks(prev => prev.filter(t => t.id !== id))
     setModalOpen(false)
     setPreviewTask(null)
-    await supabase.from("tasks").delete().eq("id",id)
-  },[])
+    // ✅ fix④: 削除エラー検知
+    const { error } = await supabase.from("tasks").delete().eq("id", id)
+    if (error) {
+      showToast("削除に失敗しました")
+      await loadTasks()
+    }
+  }, [loadTasks, showToast])
 
-  const base     =addDays(baseStart,navOffset*7)
-  const colDates =Array.from({length:viewDays},(_,i)=>addDays(base,i))
-  const headerMonth=`${colDates[0].getMonth()+1}月〜${colDates[viewDays-1].getMonth()+1}月 工程表`
-  const navLabel   =`${colDates[0].getMonth()+1}/${colDates[0].getDate()} 〜 ${colDates[viewDays-1].getMonth()+1}/${colDates[viewDays-1].getDate()}`
+  const base      = addDays(baseStart, navOffset * 7)
+  const colDates  = Array.from({ length: viewDays }, (_, i) => addDays(base, i))
+  const headerMonth = `${colDates[0].getMonth() + 1}月〜${colDates[viewDays - 1].getMonth() + 1}月 工程表`
+  const navLabel    = `${colDates[0].getMonth() + 1}/${colDates[0].getDate()} 〜 ${colDates[viewDays - 1].getMonth() + 1}/${colDates[viewDays - 1].getDate()}`
 
-  const filteredTasks=tasks.filter(t=>{
-    if(filterName  && !(t.assignee||"").includes(filterName)) return false
-    if(filterColor && t.color!==filterColor)                   return false
+  const filteredTasks = tasks.filter(t => {
+    if (filterName  && !(t.assignee || "").includes(filterName)) return false
+    if (filterColor && t.color !== filterColor)                   return false
     return true
   })
 
-  const currentPreviewTask=previewTask
-    ?(tasks.find(t=>t.id===previewTask.id)||previewTask)
-    :null
+  const currentPreviewTask = previewTask
+    ? (tasks.find(t => t.id === previewTask.id) || previewTask)
+    : null
 
   return (
     <div style={{minHeight:"100vh",background:"#EDEAE3"}}>
@@ -585,49 +702,69 @@ export default function App() {
           <div className="kh-hmonth">{headerMonth}</div>
           <div className="kh-hmode">● LIVE</div>
         </div>
-        {currentTab==="schedule"&&(
+        {currentTab === "schedule" && (
           <div className="kh-day-btns">
-            {[7,14,28].map(n=>(
+            {[7, 14, 28].map(n => (
               <button key={n} className="kh-day-btn"
-                style={{background:viewDays===n?"#F5C200":"rgba(255,255,255,0.15)",color:viewDays===n?"#192536":"#fff"}}
-                onClick={()=>setViewDays(n)}>{n}日</button>
+                style={{
+                  background: viewDays === n ? "#F5C200" : "rgba(255,255,255,0.15)",
+                  color: viewDays === n ? "#192536" : "#fff"
+                }}
+                onClick={() => setViewDays(n)}>{n}日</button>
             ))}
           </div>
         )}
       </div>
       <div className="kh-tabs">
-        {[{id:"today",label:"📅 今日"},{id:"tomorrow",label:"📆 明日"},{id:"schedule",label:"📋 工程表"}].map(tab=>(
-          <button key={tab.id} className={`kh-tab${currentTab===tab.id?" active":""}`}
-            onClick={()=>setCurrentTab(tab.id)}>{tab.label}</button>
+        {[
+          { id: "today",    label: "📅 今日" },
+          { id: "tomorrow", label: "📆 明日" },
+          { id: "schedule", label: "📋 工程表" }
+        ].map(tab => (
+          <button key={tab.id} className={`kh-tab${currentTab === tab.id ? " active" : ""}`}
+            onClick={() => setCurrentTab(tab.id)}>{tab.label}</button>
         ))}
       </div>
       <div className="kh-filter-bar">
-        <input placeholder="🏢 担当で絞り込み" value={filterName} onChange={e=>setFilterName(e.target.value)}/>
+        <input placeholder="🏢 担当で絞り込み" value={filterName}
+          onChange={e => setFilterName(e.target.value)}/>
         <div className="kh-filter-chips">
-          {COLORS.map(c=>(
-            <button key={c.id} className={`kh-chip${filterColor===c.id?" active":""}`}
-              style={filterColor===c.id?{background:c.bg}:{}}
-              onClick={()=>setFilterColor(filterColor===c.id?"":c.id)}>{c.label}</button>
+          {COLORS.map(c => (
+            <button key={c.id} className={`kh-chip${filterColor === c.id ? " active" : ""}`}
+              style={filterColor === c.id ? { background: c.bg } : {}}
+              onClick={() => setFilterColor(filterColor === c.id ? "" : c.id)}>{c.label}</button>
           ))}
         </div>
-        <button className="kh-filter-clear" onClick={()=>{setFilterName("");setFilterColor("")}}>✕ クリア</button>
+        <button className="kh-filter-clear"
+          onClick={() => { setFilterName(""); setFilterColor("") }}>✕ クリア</button>
       </div>
 
-      {currentTab==="today"&&<DayView which="today" filteredTasks={filteredTasks} toggleDone={toggleDone} setPreviewTask={setPreviewTask}/>}
-      {currentTab==="tomorrow"&&<DayView which="tomorrow" filteredTasks={filteredTasks} toggleDone={toggleDone} setPreviewTask={setPreviewTask}/>}
-      {currentTab==="schedule"&&(
-        <ScheduleView filteredTasks={filteredTasks} viewDays={viewDays} base={base}
+      {currentTab === "today" && (
+        <DayView which="today" filteredTasks={filteredTasks}
+          toggleDone={toggleDone} setPreviewTask={setPreviewTask}
+          now={now} todayKey={todayKey}/>
+      )}
+      {currentTab === "tomorrow" && (
+        <DayView which="tomorrow" filteredTasks={filteredTasks}
+          toggleDone={toggleDone} setPreviewTask={setPreviewTask}
+          now={now} todayKey={todayKey}/>
+      )}
+      {currentTab === "schedule" && (
+        <ScheduleView
+          filteredTasks={filteredTasks} viewDays={viewDays} base={base}
           navLabel={navLabel} colDates={colDates} isMobile={isMobile}
           toggleDone={toggleDone} deleteTaskById={deleteTaskById}
-          setNavOffset={setNavOffset} openModal={openModal} setPreviewTask={setPreviewTask}/>
+          setNavOffset={setNavOffset} openModal={openModal}
+          setPreviewTask={setPreviewTask} todayKey={todayKey}/>
       )}
 
-      {currentPreviewTask&&(
-        <PreviewCard task={currentPreviewTask} onClose={()=>setPreviewTask(null)}
+      {currentPreviewTask && (
+        <PreviewCard task={currentPreviewTask} onClose={() => setPreviewTask(null)}
           toggleDone={toggleDone} openModal={openModal}/>
       )}
-      {modalOpen&&(
-        <EditModal editId={editId} taskText={taskText} setTaskText={setTaskText}
+      {modalOpen && (
+        <EditModal
+          editId={editId} taskText={taskText} setTaskText={setTaskText}
           companyInput={companyInput} setCompanyInput={setCompanyInput}
           personInput={personInput} setPersonInput={setPersonInput}
           startDate={startDate} setStartDate={setStartDate}
@@ -637,6 +774,9 @@ export default function App() {
           saveTask={saveTask} deleteTaskById={deleteTaskById}
           closeModal={closeModal} taskTextRef={taskTextRef}/>
       )}
+
+      {/* ✅ fix④: エラートースト */}
+      {toastMsg && <div className="kh-toast">⚠️ {toastMsg}</div>}
     </div>
   )
 }
