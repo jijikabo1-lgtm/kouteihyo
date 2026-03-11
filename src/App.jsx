@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, memo } from "react"
 import { supabase } from "./supabaseClient"
 
 // ===================== 定数 =====================
@@ -42,7 +42,6 @@ function layoutTasks(taskList, totalCols, base) {
     const e=diffDays(base,parseKey(t.end_key))
     return {...t,col:s,endCol:e}
   }).filter(t=>t.endCol>=0&&t.col<totalCols)
-
   const lanes=[], result=[]
   for(const t of [...placed].sort((a,b)=>a.col-b.col)){
     let lane=lanes.findIndex(l=>(l[l.length-1]||{}).endCol<t.col)
@@ -53,7 +52,7 @@ function layoutTasks(taskList, totalCols, base) {
   return result
 }
 
-// ===================== グローバルCSS注入 =====================
+// ===================== グローバルCSS =====================
 const CSS = `
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-serif;min-height:100vh}
@@ -172,9 +171,344 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-preview-done-btn.is-done{background:#DCFCE7;border-color:#86EFAC;color:#16A34A}
 `
 
+// ===================== 今日・明日ビュー（App外で定義） =====================
+const DayView = memo(function DayView({ which, tasks, taskMatchesFilter, toggleDone, setPreviewTask }) {
+  const targetDate = which==="tomorrow" ? addDays(now,1) : now
+  const targetKey  = toKey(targetDate)
+  const month=targetDate.getMonth()+1, date=targetDate.getDate(), dow=DAYS_JA[targetDate.getDay()]
+  const label=which==="tomorrow"?"明日の作業":"本日の作業"
+
+  const dayTasks=tasks.filter(t=>{
+    const s=parseKey(t.start_key), e=parseKey(t.end_key), target=parseKey(targetKey)
+    return target>=s&&target<=e&&taskMatchesFilter(t)
+  })
+  const doneCount=dayTasks.filter(t=>t.done).length
+
+  return (
+    <div className="kh-day-view">
+      <div className="kh-dv-header">
+        <span>{label}</span>
+        <span className="kh-dv-badge">{month}月{date}日（{dow}）</span>
+        <span style={{fontSize:11,color:"#888",fontWeight:600}}>{dayTasks.length}件</span>
+      </div>
+      {dayTasks.length===0?(
+        <div className="kh-dv-empty">
+          📋 {label}はありません
+          <br/><span style={{fontSize:12,color:"#BBB",marginTop:6,display:"block"}}>工程表タブから追加できます</span>
+        </div>
+      ):(
+        <>
+          {dayTasks.map(t=>{
+            const c=COLORS.find(x=>x.id===t.color)||COLORS[0]
+            const days=diffDays(parseKey(t.start_key),parseKey(t.end_key))
+            return (
+              <div key={t.id} className={`kh-card${t.done?" done":""}`}>
+                <div className="kh-card-accent" style={{background:c.bg}}/>
+                <div className="kh-card-body" onClick={()=>setPreviewTask(t)}>
+                  <div className="kh-card-title">{t.text}</div>
+                  <div className="kh-card-meta">
+                    <span>🏗 {c.label}</span>
+                    <span>🏢 {t.assignee||"未設定"}</span>
+                    {days>0&&<span>📆 {days+1}日間</span>}
+                  </div>
+                </div>
+                <div className="kh-card-right">
+                  <button
+                    className={`kh-card-done-btn${t.done?" checked":""}`}
+                    onClick={e=>{e.stopPropagation();toggleDone(t.id)}}
+                  >✓</button>
+                </div>
+              </div>
+            )
+          })}
+          {doneCount>0&&(
+            <div className="kh-dv-summary">✅ {doneCount}件完了 / {dayTasks.length}件中</div>
+          )}
+        </>
+      )}
+    </div>
+  )
+})
+
+// ===================== 工程表ビュー（App外で定義） =====================
+const ScheduleView = memo(function ScheduleView({
+  tasks, viewDays, navOffset, taskMatchesFilter,
+  toggleDone, deleteTaskById, setPreviewTask, openModal
+}) {
+  const base     = addDays(baseStart, navOffset*7)
+  const colDates = Array.from({length:viewDays},(_,i)=>addDays(base,i))
+  const navLabel = `${colDates[0].getMonth()+1}/${colDates[0].getDate()} 〜 ${colDates[viewDays-1].getMonth()+1}/${colDates[viewDays-1].getDate()}`
+  const isMobile = window.innerWidth<=768
+
+  const filteredTasks=tasks.filter(taskMatchesFilter)
+  const laidOut=layoutTasks(filteredTasks,viewDays,base)
+  const maxLane=laidOut.reduce((m,t)=>Math.max(m,t.lane),-1)
+  const LANE_H=26
+  const GRID_H=Math.max((maxLane+1)*LANE_H+8,56)
+  const weeks=[]
+  for(let i=0;i<viewDays;i+=7) weeks.push({wo:i,days:colDates.slice(i,i+7)})
+
+  return (
+    <>
+      <div className="kh-nav">
+        <button className="kh-nav-btn" onClick={()=>openModal(null,"prev")}>◀ 前週</button>
+        <span className="kh-nav-label">{navLabel}</span>
+        <button className="kh-nav-btn" onClick={()=>openModal(null,"next")}>次週 ▶</button>
+      </div>
+      {isMobile&&viewDays>7&&<div className="kh-zoom-hint">🔍 ピンチ操作で拡大できます</div>}
+      <div className="kh-grid-wrap">
+        {weeks.map(({wo,days:week})=>{
+          const wLen=week.length
+          const weekTasks=laidOut.filter(t=>t.endCol>=wo&&t.col<wo+wLen)
+          return (
+            <div key={wo} className="kh-week-block">
+              <div className="kh-day-header" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
+                {week.map((date,di)=>{
+                  const dow=date.getDay(), key=toKey(date), isToday=key===todayKey
+                  const cls=isToday?"today":dow===0?"sun":dow===6?"sat":""
+                  return (
+                    <div key={di} className={`kh-day-cell${cls?" "+cls:""}`} onClick={()=>openModal(key,"add")}>
+                      <div className="kh-day-left">
+                        <span className={`kh-dow${dow===0?" sun":dow===6?" sat":""}`}>{DAYS_JA[dow]}</span>
+                        <span className={`kh-dnum${dow===0?" sun":dow===6?" sat":""}`}>{date.getDate()}</span>
+                        <span className="kh-dmonth">{date.getMonth()+1}月</span>
+                      </div>
+                      <span className="kh-plus">＋</span>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="kh-task-area" style={{height:GRID_H}}>
+                <div className="kh-col-grid" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
+                  {week.map((date,di)=>(
+                    <div key={di} className="kh-col-div"
+                      style={{
+                        background:date.getDay()===0?"rgba(200,0,0,0.04)":date.getDay()===6?"rgba(0,0,200,0.04)":"transparent",
+                        borderRight:di===wLen-1?"none":undefined,
+                      }}/>
+                  ))}
+                </div>
+                {weekTasks.map(t=>{
+                  const c=COLORS.find(x=>x.id===t.color)||COLORS[0]
+                  const ls=Math.max(t.col-wo,0), le=Math.min(t.endCol-wo,wLen-1), span=le-ls+1
+                  const sh=t.col>=wo, eh=t.endCol<wo+wLen
+                  return (
+                    <div key={t.id}
+                      className={`kh-task-bar${t.done?" done":""}`}
+                      title={`${t.text}${t.assignee?" ／ "+t.assignee:""}`}
+                      style={{
+                        top:t.lane*LANE_H+3,
+                        left:`calc(${ls*100/wLen}% + ${sh?2:0}px)`,
+                        width:`calc(${span*100/wLen}% - ${(sh?2:0)+(eh?2:0)}px)`,
+                        height:LANE_H-4,
+                        background:c.bg,
+                        borderRadius:`${sh?4:0}px ${eh?4:0}px ${eh?4:0}px ${sh?4:0}px`,
+                        paddingLeft:sh?5:2,
+                        paddingRight:eh?4:2,
+                        zIndex:10,
+                      }}
+                      onClick={()=>setPreviewTask(t)}
+                    >
+                      {!sh&&<span style={{marginRight:2,opacity:0.8,fontSize:8}}>◀</span>}
+                      <span className="kh-bar-text" style={{flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>
+                        {t.assignee&&<span style={{opacity:0.7,marginRight:2}}>{t.assignee}</span>}
+                        {t.text}
+                      </span>
+                      {!eh&&<span style={{marginLeft:2,opacity:0.8,fontSize:8}}>▶</span>}
+                      {eh&&(
+                        <>
+                          <button
+                            className={`kh-done-check${t.done?" checked":""}`}
+                            onClick={e=>{e.stopPropagation();toggleDone(t.id)}}
+                          >{t.done?"✓":""}</button>
+                          <button
+                            onClick={e=>{e.stopPropagation();deleteTaskById(t.id)}}
+                            style={{marginLeft:2,background:"rgba(0,0,0,0.25)",border:"none",borderRadius:3,color:"#fff",fontSize:8,cursor:"pointer",padding:"1px 3px",flexShrink:0}}
+                          >✕</button>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="kh-legend">
+        {COLORS.map(c=>(
+          <div key={c.id} className="kh-legend-item">
+            <div className="kh-legend-dot" style={{background:c.bg}}/>
+            {c.label}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+})
+
+// ===================== プレビューカード（App外で定義） =====================
+const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, onEdit }) {
+  if(!task) return null
+  const c=COLORS.find(x=>x.id===task.color)||COLORS[0]
+  const s=parseKey(task.start_key), e=parseKey(task.end_key)
+  const days=diffDays(s,e)
+  const {company,person}=splitAssignee(task.assignee)
+  return (
+    <div className="kh-preview-bg" onClick={onClose}>
+      <div className="kh-preview-card" onClick={ev=>ev.stopPropagation()}>
+        <div className="kh-preview-accent" style={{background:c.bg}}>
+          <div style={{flex:1}}>
+            <div className="kh-preview-type-badge">🏗 {c.label}</div>
+            <div className="kh-preview-title">{task.text}</div>
+          </div>
+          <button className="kh-preview-close" onClick={onClose}>×</button>
+        </div>
+        <div className="kh-preview-body">
+          {task.done&&<div className="kh-preview-done-badge">✅ 完了済み</div>}
+          <div className="kh-preview-daterange">
+            <div className="kh-preview-date-block">
+              <div className="kh-preview-date-label">📅 開始日</div>
+              <div className="kh-preview-date-value">{s.getMonth()+1}/{s.getDate()}</div>
+              <div className="kh-preview-date-sub">{DAYS_JA[s.getDay()]}曜日</div>
+            </div>
+            <div className="kh-preview-date-arrow">→</div>
+            <div className="kh-preview-date-block">
+              <div className="kh-preview-date-label">🏁 終了日</div>
+              <div className="kh-preview-date-value">{e.getMonth()+1}/{e.getDate()}</div>
+              <div className="kh-preview-date-sub">{DAYS_JA[e.getDay()]}曜日</div>
+            </div>
+          </div>
+          <div className="kh-preview-duration">
+            {days===0?"📌 単日作業":`📆 ${days+1}日間（${task.start_key} 〜 ${task.end_key}）`}
+          </div>
+          <div className="kh-preview-info-row">
+            <div className="kh-preview-info-item">
+              <div className="kh-preview-info-label">🏢 会社名</div>
+              <div className={`kh-preview-info-value${company?"":" empty"}`}>{company||"未設定"}</div>
+            </div>
+            <div className="kh-preview-info-item">
+              <div className="kh-preview-info-label">👤 担当者</div>
+              <div className={`kh-preview-info-value${person?"":" empty"}`}>{person||"未設定"}</div>
+            </div>
+          </div>
+        </div>
+        <div className="kh-preview-actions">
+          <button
+            className={`kh-preview-done-btn${task.done?" is-done":""}`}
+            onClick={()=>toggleDone(task.id)}
+          >{task.done?"↩ 未完了に戻す":"✓ 完了にする"}</button>
+          <button className="kh-preview-edit-btn" onClick={onEdit}>✏️ 編集する</button>
+        </div>
+      </div>
+    </div>
+  )
+})
+
+// ===================== 編集モーダル（App外で定義） =====================
+const EditModal = memo(function EditModal({
+  editId, taskText, setTaskText,
+  companyInput, setCompanyInput,
+  personInput, setPersonInput,
+  startDate, setStartDate,
+  endDate, setEndDate,
+  selectedColor, setSelectedColor,
+  assigneeHistory, setAssigneeHistory,
+  onSave, onDelete, onClose,
+  taskTextRef,
+}) {
+  const isEdit=editId!==null
+  const onStartChange=(v)=>{setStartDate(v);if(v>endDate)setEndDate(v)}
+  return (
+    <div className="kh-modal-bg" onClick={onClose}>
+      <div className="kh-modal" onClick={e=>e.stopPropagation()}>
+        <div className="kh-modal-head">
+          <div className="kh-modal-title">{isEdit?"✏️ タスクを編集":"📝 タスク追加"}</div>
+          {isEdit&&<button className="kh-del-btn" onClick={()=>onDelete(editId)}>🗑 削除</button>}
+        </div>
+
+        <div className="kh-field-label">🔨 作業内容</div>
+        <input
+          ref={taskTextRef}
+          className="kh-task-input"
+          value={taskText}
+          onChange={e=>setTaskText(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&onSave()}
+          placeholder="例：1F 配筋検査 13:00〜"
+        />
+
+        <div className="kh-assignee-wrap">
+          <div className="kh-field-label">🏢 担当</div>
+          <div className="kh-assignee-row">
+            <input
+              className="kh-assignee-input"
+              value={companyInput}
+              onChange={e=>setCompanyInput(e.target.value)}
+              placeholder="会社名（例：山田工務店）"
+            />
+            <input
+              className="kh-assignee-input"
+              value={personInput}
+              onChange={e=>setPersonInput(e.target.value)}
+              placeholder="担当者名（例：田中）"
+            />
+          </div>
+          {assigneeHistory.length>0&&(
+            <>
+              <div className="kh-history-label">📋 履歴から選ぶ</div>
+              <div className="kh-assignee-history">
+                {assigneeHistory.map((h,i)=>(
+                  <div key={i} className="kh-history-item">
+                    <button className="kh-history-name"
+                      onClick={()=>{setCompanyInput(h.company||"");setPersonInput(h.person||"")}}>
+                      {h.company&&h.person?`${h.company} ${h.person}`:h.company||h.person}
+                    </button>
+                    <button className="kh-history-del"
+                      onClick={()=>setAssigneeHistory(prev=>prev.filter((_,j)=>j!==i))}>×</button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="kh-field-label" style={{marginBottom:8}}>🏗 工種</div>
+        <div className="kh-color-btns">
+          {COLORS.map(c=>(
+            <button key={c.id} className="kh-color-btn"
+              style={{
+                background:c.bg,
+                transform:selectedColor===c.id?"scale(1.1)":"none",
+                outline:selectedColor===c.id?`3px solid ${c.bg}`:"none",
+                outlineOffset:2,
+              }}
+              onClick={()=>setSelectedColor(c.id)}
+            >🏗 {c.label}</button>
+          ))}
+        </div>
+
+        <div className="kh-date-row">
+          <div className="kh-date-col">
+            <div className="kh-field-label">📅 開始日</div>
+            <input type="date" className="kh-date-input" value={startDate}
+              onChange={e=>onStartChange(e.target.value)}/>
+          </div>
+          <div style={{fontSize:20,color:"#C8C3BA",paddingBottom:8}}>→</div>
+          <div className="kh-date-col">
+            <div className="kh-field-label">🏁 終了日</div>
+            <input type="date" className="kh-date-input" value={endDate}
+              onChange={e=>setEndDate(e.target.value)}/>
+          </div>
+        </div>
+
+        <button className="kh-save-btn" onClick={onSave}>{isEdit?"更新する":"追加する"}</button>
+      </div>
+    </div>
+  )
+})
+
 // ===================== メインコンポーネント =====================
 export default function App() {
-  // ---- State ----
   const [tasks, setTasks]                     = useState([])
   const [navOffset, setNavOffset]             = useState(0)
   const [viewDays, setViewDays]               = useState(14)
@@ -183,36 +517,31 @@ export default function App() {
   const [filterColor, setFilterColor]         = useState("")
   const [previewTask, setPreviewTask]         = useState(null)
   const [assigneeHistory, setAssigneeHistory] = useState([])
-
-  // モーダル用state
-  const [modalOpen, setModalOpen]         = useState(false)
-  const [editId, setEditId]               = useState(null)
-  const [selectedColor, setSelectedColor] = useState("orange")
-  const [taskText, setTaskText]           = useState("")
-  const [companyInput, setCompanyInput]   = useState("")
-  const [personInput, setPersonInput]     = useState("")
-  const [startDate, setStartDate]         = useState("")
-  const [endDate, setEndDate]             = useState("")
-
+  const [modalOpen, setModalOpen]             = useState(false)
+  const [editId, setEditId]                   = useState(null)
+  const [selectedColor, setSelectedColor]     = useState("orange")
+  const [taskText, setTaskText]               = useState("")
+  const [companyInput, setCompanyInput]       = useState("")
+  const [personInput, setPersonInput]         = useState("")
+  const [startDate, setStartDate]             = useState("")
+  const [endDate, setEndDate]                 = useState("")
   const taskTextRef = useRef(null)
-  const isMobile    = typeof window !== "undefined" && window.innerWidth <= 768
 
-  // ---- CSS注入 ----
+  // CSS注入
   useEffect(()=>{
-    const style = document.createElement("style")
+    const style=document.createElement("style")
     style.setAttribute("data-kh","1")
-    style.textContent = CSS
+    style.textContent=CSS
     document.head.appendChild(style)
-    return ()=> document.head.removeChild(style)
+    return ()=>document.head.removeChild(style)
   },[])
 
-  // ---- Supabase リアルタイム購読 ----
+  // Supabase購読
   useEffect(()=>{
     supabase.from("tasks").select("*").order("start_key").then(({data})=>{
-      if(data) setTasks(data.map(t=>({...t, done:t.done||false})))
+      if(data) setTasks(data.map(t=>({...t,done:t.done||false})))
     })
-    const channel = supabase
-      .channel("tasks-channel")
+    const channel=supabase.channel("tasks-channel")
       .on("postgres_changes",{event:"INSERT",schema:"public",table:"tasks"},({new:rec})=>{
         setTasks(prev=>[...prev,{...rec,done:rec.done||false}])
       })
@@ -224,17 +553,15 @@ export default function App() {
         setTasks(prev=>prev.filter(t=>t.id!==rec.id))
       })
       .subscribe()
-    return ()=> supabase.removeChannel(channel)
+    return ()=>supabase.removeChannel(channel)
   },[])
 
-  // ---- フィルター ----
   const taskMatchesFilter = useCallback((t)=>{
     if(filterName  && !(t.assignee||"").includes(filterName)) return false
     if(filterColor && t.color!==filterColor)                  return false
     return true
   },[filterName,filterColor])
 
-  // ---- 完了トグル ----
   const toggleDone = useCallback(async (id)=>{
     const task=tasks.find(t=>t.id===id)
     if(!task) return
@@ -244,27 +571,40 @@ export default function App() {
     await supabase.from("tasks").update({done:newDone}).eq("id",id)
   },[tasks])
 
-  // ---- モーダルを開く ----
-  const openModal = useCallback((dateKey, task=null)=>{
-    setEditId(task?task.id:null)
-    setSelectedColor(task?task.color:"orange")
-    setTaskText(task?task.text:"")
-    setStartDate(task?task.start_key:dateKey)
-    setEndDate(task?task.end_key:dateKey)
-    const {company,person}=splitAssignee(task?task.assignee:"")
+  // ナビ操作もopenModalで受け取る（ScheduleViewのnav用）
+  const handleScheduleAction = useCallback((dateKey, action)=>{
+    if(action==="prev") { setNavOffset(o=>o-1); return }
+    if(action==="next") { setNavOffset(o=>o+1); return }
+    // addの場合はモーダルを開く
+    setEditId(null)
+    setSelectedColor("orange")
+    setTaskText("")
+    setStartDate(dateKey)
+    setEndDate(dateKey)
+    setCompanyInput("")
+    setPersonInput("")
+    setModalOpen(true)
+    setTimeout(()=>taskTextRef.current?.focus(),80)
+  },[])
+
+  const openModalForEdit = useCallback((task)=>{
+    setEditId(task.id)
+    setSelectedColor(task.color)
+    setTaskText(task.text)
+    setStartDate(task.start_key)
+    setEndDate(task.end_key)
+    const {company,person}=splitAssignee(task.assignee)
     setCompanyInput(company)
     setPersonInput(person)
     setModalOpen(true)
     setTimeout(()=>taskTextRef.current?.focus(),80)
   },[])
 
-  // ---- タスク保存 ----
   const saveTask = useCallback(async ()=>{
     const text=taskText.trim()
     if(!text) return
-    const company  = companyInput.trim()
-    const person   = personInput.trim()
-    const assignee = assigneeLabel(company,person)
+    const company=companyInput.trim(), person=personInput.trim()
+    const assignee=assigneeLabel(company,person)
     if(company||person){
       setAssigneeHistory(prev=>{
         const exists=prev.some(h=>h.company===company&&h.person===person)
@@ -272,331 +612,37 @@ export default function App() {
       })
     }
     if(editId){
+      // ローカルを即時更新
+      setTasks(prev=>prev.map(t=>
+        t.id===editId ? {...t,text,assignee,start_key:startDate,end_key:endDate,color:selectedColor} : t
+      ))
       await supabase.from("tasks").update({text,assignee,start_key:startDate,end_key:endDate,color:selectedColor}).eq("id",editId)
     } else {
-      await supabase.from("tasks").insert({text,assignee,start_key:startDate,end_key:endDate,color:selectedColor,done:false})
+      // 楽観的UI：仮IDで即時追加し、Supabaseの返り値で正式IDに差し替え
+      const tempId = `temp_${Date.now()}`
+      const newTask = {id:tempId,text,assignee,start_key:startDate,end_key:endDate,color:selectedColor,done:false}
+      setTasks(prev=>[...prev,newTask])
+      const {data,error} = await supabase.from("tasks").insert({text,assignee,start_key:startDate,end_key:endDate,color:selectedColor,done:false}).select().single()
+      if(!error&&data){
+        setTasks(prev=>prev.map(t=>t.id===tempId ? {...data,done:false} : t))
+      } else if(error){
+        setTasks(prev=>prev.filter(t=>t.id!==tempId))
+      }
     }
     setModalOpen(false)
   },[taskText,companyInput,personInput,editId,startDate,endDate,selectedColor])
 
-  // ---- タスク削除 ----
   const deleteTaskById = useCallback(async (id)=>{
-    await supabase.from("tasks").delete().eq("id",id)
+    setTasks(prev=>prev.filter(t=>t.id!==id))
     setModalOpen(false)
     setPreviewTask(null)
+    await supabase.from("tasks").delete().eq("id",id)
   },[])
 
-  // ---- ナビ計算 ----
-  const base     = addDays(baseStart,navOffset*7)
-  const colDates = Array.from({length:viewDays},(_,i)=>addDays(base,i))
-  const headerMonth = `${colDates[0].getMonth()+1}月〜${colDates[viewDays-1].getMonth()+1}月 工程表`
-  const navLabel    = `${colDates[0].getMonth()+1}/${colDates[0].getDate()} 〜 ${colDates[viewDays-1].getMonth()+1}/${colDates[viewDays-1].getDate()}`
+  const base=addDays(baseStart,navOffset*7)
+  const colDates=Array.from({length:viewDays},(_,i)=>addDays(base,i))
+  const headerMonth=`${colDates[0].getMonth()+1}月〜${colDates[viewDays-1].getMonth()+1}月 工程表`
 
-  // ===================== 今日・明日ビュー =====================
-  function DayView({which}) {
-    const targetDate = which==="tomorrow" ? addDays(now,1) : now
-    const targetKey  = toKey(targetDate)
-    const month=targetDate.getMonth()+1, date=targetDate.getDate(), dow=DAYS_JA[targetDate.getDay()]
-    const label=which==="tomorrow"?"明日の作業":"本日の作業"
-
-    const dayTasks=tasks.filter(t=>{
-      const s=parseKey(t.start_key), e=parseKey(t.end_key), target=parseKey(targetKey)
-      return target>=s&&target<=e&&taskMatchesFilter(t)
-    })
-    const doneCount=dayTasks.filter(t=>t.done).length
-
-    return (
-      <div className="kh-day-view">
-        <div className="kh-dv-header">
-          <span>{label}</span>
-          <span className="kh-dv-badge">{month}月{date}日（{dow}）</span>
-          <span style={{fontSize:11,color:"#888",fontWeight:600}}>{dayTasks.length}件</span>
-        </div>
-        {dayTasks.length===0?(
-          <div className="kh-dv-empty">
-            📋 {label}はありません
-            <br/><span style={{fontSize:12,color:"#BBB",marginTop:6,display:"block"}}>工程表タブから追加できます</span>
-          </div>
-        ):(
-          <>
-            {dayTasks.map(t=>{
-              const c=COLORS.find(x=>x.id===t.color)||COLORS[0]
-              const days=diffDays(parseKey(t.start_key),parseKey(t.end_key))
-              return (
-                <div key={t.id} className={`kh-card${t.done?" done":""}`}>
-                  <div className="kh-card-accent" style={{background:c.bg}}/>
-                  <div className="kh-card-body" onClick={()=>setPreviewTask(tasks.find(x=>x.id===t.id)||t)}>
-                    <div className="kh-card-title">{t.text}</div>
-                    <div className="kh-card-meta">
-                      <span>🏗 {c.label}</span>
-                      <span>🏢 {t.assignee||"未設定"}</span>
-                      {days>0&&<span>📆 {days+1}日間</span>}
-                    </div>
-                  </div>
-                  <div className="kh-card-right">
-                    <button
-                      className={`kh-card-done-btn${t.done?" checked":""}`}
-                      onClick={e=>{e.stopPropagation();toggleDone(t.id)}}
-                    >✓</button>
-                  </div>
-                </div>
-              )
-            })}
-            {doneCount>0&&(
-              <div className="kh-dv-summary">✅ {doneCount}件完了 / {dayTasks.length}件中</div>
-            )}
-          </>
-        )}
-      </div>
-    )
-  }
-
-  // ===================== 工程表ビュー =====================
-  function ScheduleView() {
-    const filteredTasks=tasks.filter(taskMatchesFilter)
-    const laidOut=layoutTasks(filteredTasks,viewDays,base)
-    const maxLane=laidOut.reduce((m,t)=>Math.max(m,t.lane),-1)
-    const LANE_H=26
-    const GRID_H=Math.max((maxLane+1)*LANE_H+8,56)
-    const weeks=[]
-    for(let i=0;i<viewDays;i+=7) weeks.push({wo:i,days:colDates.slice(i,i+7)})
-
-    return (
-      <>
-        <div className="kh-nav">
-          <button className="kh-nav-btn" onClick={()=>setNavOffset(o=>o-1)}>◀ 前週</button>
-          <span className="kh-nav-label">{navLabel}</span>
-          <button className="kh-nav-btn" onClick={()=>setNavOffset(o=>o+1)}>次週 ▶</button>
-        </div>
-        {isMobile&&viewDays>7&&<div className="kh-zoom-hint">🔍 ピンチ操作で拡大できます</div>}
-        <div className="kh-grid-wrap">
-          {weeks.map(({wo,days:week})=>{
-            const wLen=week.length
-            const weekTasks=laidOut.filter(t=>t.endCol>=wo&&t.col<wo+wLen)
-            return (
-              <div key={wo} className="kh-week-block">
-                <div className="kh-day-header" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
-                  {week.map((date,di)=>{
-                    const dow=date.getDay(), key=toKey(date), isToday=key===todayKey
-                    const cls=isToday?"today":dow===0?"sun":dow===6?"sat":""
-                    return (
-                      <div key={di} className={`kh-day-cell${cls?" "+cls:""}`} onClick={()=>openModal(key)}>
-                        <div className="kh-day-left">
-                          <span className={`kh-dow${dow===0?" sun":dow===6?" sat":""}`}>{DAYS_JA[dow]}</span>
-                          <span className={`kh-dnum${dow===0?" sun":dow===6?" sat":""}`}>{date.getDate()}</span>
-                          <span className="kh-dmonth">{date.getMonth()+1}月</span>
-                        </div>
-                        <span className="kh-plus">＋</span>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div className="kh-task-area" style={{height:GRID_H}}>
-                  <div className="kh-col-grid" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
-                    {week.map((date,di)=>(
-                      <div key={di} className="kh-col-div"
-                        style={{
-                          background:date.getDay()===0?"rgba(200,0,0,0.04)":date.getDay()===6?"rgba(0,0,200,0.04)":"transparent",
-                          borderRight:di===wLen-1?"none":undefined,
-                        }}/>
-                    ))}
-                  </div>
-                  {weekTasks.map(t=>{
-                    const c=COLORS.find(x=>x.id===t.color)||COLORS[0]
-                    const ls=Math.max(t.col-wo,0), le=Math.min(t.endCol-wo,wLen-1), span=le-ls+1
-                    const sh=t.col>=wo, eh=t.endCol<wo+wLen
-                    return (
-                      <div key={t.id}
-                        className={`kh-task-bar${t.done?" done":""}`}
-                        title={`${t.text}${t.assignee?" ／ "+t.assignee:""}`}
-                        style={{
-                          top:t.lane*LANE_H+3,
-                          left:`calc(${ls*100/wLen}% + ${sh?2:0}px)`,
-                          width:`calc(${span*100/wLen}% - ${(sh?2:0)+(eh?2:0)}px)`,
-                          height:LANE_H-4,
-                          background:c.bg,
-                          borderRadius:`${sh?4:0}px ${eh?4:0}px ${eh?4:0}px ${sh?4:0}px`,
-                          paddingLeft:sh?5:2,
-                          paddingRight:eh?4:2,
-                          zIndex:10,
-                        }}
-                        onClick={()=>setPreviewTask(tasks.find(x=>x.id===t.id)||t)}
-                      >
-                        {!sh&&<span style={{marginRight:2,opacity:0.8,fontSize:8}}>◀</span>}
-                        <span className="kh-bar-text" style={{flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>
-                          {t.assignee&&<span style={{opacity:0.7,marginRight:2}}>{t.assignee}</span>}
-                          {t.text}
-                        </span>
-                        {!eh&&<span style={{marginLeft:2,opacity:0.8,fontSize:8}}>▶</span>}
-                        {eh&&(
-                          <>
-                            <button
-                              className={`kh-done-check${t.done?" checked":""}`}
-                              onClick={e=>{e.stopPropagation();toggleDone(t.id)}}
-                            >{t.done?"✓":""}</button>
-                            <button
-                              onClick={e=>{e.stopPropagation();deleteTaskById(t.id)}}
-                              style={{marginLeft:2,background:"rgba(0,0,0,0.25)",border:"none",borderRadius:3,color:"#fff",fontSize:8,cursor:"pointer",padding:"1px 3px",flexShrink:0}}
-                            >✕</button>
-                          </>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-        <div className="kh-legend">
-          {COLORS.map(c=>(
-            <div key={c.id} className="kh-legend-item">
-              <div className="kh-legend-dot" style={{background:c.bg}}/>
-              {c.label}
-            </div>
-          ))}
-        </div>
-      </>
-    )
-  }
-
-  // ===================== プレビューカード =====================
-  function PreviewCard({task,onClose}) {
-    if(!task) return null
-    const c=COLORS.find(x=>x.id===task.color)||COLORS[0]
-    const s=parseKey(task.start_key), e=parseKey(task.end_key)
-    const days=diffDays(s,e)
-    const {company,person}=splitAssignee(task.assignee)
-    return (
-      <div className="kh-preview-bg" onClick={onClose}>
-        <div className="kh-preview-card" onClick={ev=>ev.stopPropagation()}>
-          <div className="kh-preview-accent" style={{background:c.bg}}>
-            <div style={{flex:1}}>
-              <div className="kh-preview-type-badge">🏗 {c.label}</div>
-              <div className="kh-preview-title">{task.text}</div>
-            </div>
-            <button className="kh-preview-close" onClick={onClose}>×</button>
-          </div>
-          <div className="kh-preview-body">
-            {task.done&&<div className="kh-preview-done-badge">✅ 完了済み</div>}
-            <div className="kh-preview-daterange">
-              <div className="kh-preview-date-block">
-                <div className="kh-preview-date-label">📅 開始日</div>
-                <div className="kh-preview-date-value">{s.getMonth()+1}/{s.getDate()}</div>
-                <div className="kh-preview-date-sub">{DAYS_JA[s.getDay()]}曜日</div>
-              </div>
-              <div className="kh-preview-date-arrow">→</div>
-              <div className="kh-preview-date-block">
-                <div className="kh-preview-date-label">🏁 終了日</div>
-                <div className="kh-preview-date-value">{e.getMonth()+1}/{e.getDate()}</div>
-                <div className="kh-preview-date-sub">{DAYS_JA[e.getDay()]}曜日</div>
-              </div>
-            </div>
-            <div className="kh-preview-duration">
-              {days===0?"📌 単日作業":`📆 ${days+1}日間（${task.start_key} 〜 ${task.end_key}）`}
-            </div>
-            <div className="kh-preview-info-row">
-              <div className="kh-preview-info-item">
-                <div className="kh-preview-info-label">🏢 会社名</div>
-                <div className={`kh-preview-info-value${company?"":" empty"}`}>{company||"未設定"}</div>
-              </div>
-              <div className="kh-preview-info-item">
-                <div className="kh-preview-info-label">👤 担当者</div>
-                <div className={`kh-preview-info-value${person?"":" empty"}`}>{person||"未設定"}</div>
-              </div>
-            </div>
-          </div>
-          <div className="kh-preview-actions">
-            <button
-              className={`kh-preview-done-btn${task.done?" is-done":""}`}
-              onClick={()=>toggleDone(task.id)}
-            >{task.done?"↩ 未完了に戻す":"✓ 完了にする"}</button>
-            <button
-              className="kh-preview-edit-btn"
-              onClick={()=>{onClose();openModal(task.start_key,task)}}
-            >✏️ 編集する</button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // ===================== 編集モーダル =====================
-  function EditModal() {
-    const isEdit=editId!==null
-    const onStartChange=(v)=>{setStartDate(v);if(v>endDate)setEndDate(v)}
-    return (
-      <div className="kh-modal-bg" onClick={()=>setModalOpen(false)}>
-        <div className="kh-modal" onClick={e=>e.stopPropagation()}>
-          <div className="kh-modal-head">
-            <div className="kh-modal-title">{isEdit?"✏️ タスクを編集":"📝 タスク追加"}</div>
-            {isEdit&&<button className="kh-del-btn" onClick={()=>deleteTaskById(editId)}>🗑 削除</button>}
-          </div>
-          <div className="kh-field-label">🔨 作業内容</div>
-          <input ref={taskTextRef} className="kh-task-input" value={taskText}
-            onChange={e=>setTaskText(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&saveTask()}
-            placeholder="例：1F 配筋検査 13:00〜"/>
-          <div className="kh-assignee-wrap">
-            <div className="kh-field-label">🏢 担当</div>
-            <div className="kh-assignee-row">
-              <input className="kh-assignee-input" value={companyInput}
-                onChange={e=>setCompanyInput(e.target.value)} placeholder="会社名（例：山田工務店）"/>
-              <input className="kh-assignee-input" value={personInput}
-                onChange={e=>setPersonInput(e.target.value)} placeholder="担当者名（例：田中）"/>
-            </div>
-            {assigneeHistory.length>0&&(
-              <>
-                <div className="kh-history-label">📋 履歴から選ぶ</div>
-                <div className="kh-assignee-history">
-                  {assigneeHistory.map((h,i)=>(
-                    <div key={i} className="kh-history-item">
-                      <button className="kh-history-name"
-                        onClick={()=>{setCompanyInput(h.company||"");setPersonInput(h.person||"")}}>
-                        {h.company&&h.person?`${h.company} ${h.person}`:h.company||h.person}
-                      </button>
-                      <button className="kh-history-del"
-                        onClick={()=>setAssigneeHistory(prev=>prev.filter((_,j)=>j!==i))}>×</button>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-          <div className="kh-field-label" style={{marginBottom:8}}>🏗 工種</div>
-          <div className="kh-color-btns">
-            {COLORS.map(c=>(
-              <button key={c.id} className="kh-color-btn"
-                style={{
-                  background:c.bg,
-                  transform:selectedColor===c.id?"scale(1.1)":"none",
-                  outline:selectedColor===c.id?`3px solid ${c.bg}`:"none",
-                  outlineOffset:2,
-                }}
-                onClick={()=>setSelectedColor(c.id)}
-              >🏗 {c.label}</button>
-            ))}
-          </div>
-          <div className="kh-date-row">
-            <div className="kh-date-col">
-              <div className="kh-field-label">📅 開始日</div>
-              <input type="date" className="kh-date-input" value={startDate}
-                onChange={e=>onStartChange(e.target.value)}/>
-            </div>
-            <div style={{fontSize:20,color:"#C8C3BA",paddingBottom:8}}>→</div>
-            <div className="kh-date-col">
-              <div className="kh-field-label">🏁 終了日</div>
-              <input type="date" className="kh-date-input" value={endDate}
-                onChange={e=>setEndDate(e.target.value)}/>
-            </div>
-          </div>
-          <button className="kh-save-btn" onClick={saveTask}>{isEdit?"更新する":"追加する"}</button>
-        </div>
-      </div>
-    )
-  }
-
-  // ===================== レンダリング =====================
   return (
     <div style={{minHeight:"100vh",background:"#EDEAE3"}}>
       {/* ヘッダー */}
@@ -610,10 +656,7 @@ export default function App() {
           <div className="kh-day-btns">
             {[7,14,28].map(n=>(
               <button key={n} className="kh-day-btn"
-                style={{
-                  background:viewDays===n?"#F5C200":"rgba(255,255,255,0.15)",
-                  color:viewDays===n?"#192536":"#fff",
-                }}
+                style={{background:viewDays===n?"#F5C200":"rgba(255,255,255,0.15)",color:viewDays===n?"#192536":"#fff"}}
                 onClick={()=>setViewDays(n)}
               >{n}日</button>
             ))}
@@ -623,11 +666,7 @@ export default function App() {
 
       {/* タブ */}
       <div className="kh-tabs">
-        {[
-          {id:"today",    label:"📅 今日"},
-          {id:"tomorrow", label:"📆 明日"},
-          {id:"schedule", label:"📋 工程表"},
-        ].map(tab=>(
+        {[{id:"today",label:"📅 今日"},{id:"tomorrow",label:"📆 明日"},{id:"schedule",label:"📋 工程表"}].map(tab=>(
           <button key={tab.id}
             className={`kh-tab${currentTab===tab.id?" active":""}`}
             onClick={()=>setCurrentTab(tab.id)}
@@ -637,8 +676,7 @@ export default function App() {
 
       {/* フィルターバー */}
       <div className="kh-filter-bar">
-        <input placeholder="🏢 担当で絞り込み" value={filterName}
-          onChange={e=>setFilterName(e.target.value)}/>
+        <input placeholder="🏢 担当で絞り込み" value={filterName} onChange={e=>setFilterName(e.target.value)}/>
         <div className="kh-filter-chips">
           {COLORS.map(c=>(
             <button key={c.id}
@@ -648,26 +686,55 @@ export default function App() {
             >{c.label}</button>
           ))}
         </div>
-        <button className="kh-filter-clear"
-          onClick={()=>{setFilterName("");setFilterColor("")}}
-        >✕ クリア</button>
+        <button className="kh-filter-clear" onClick={()=>{setFilterName("");setFilterColor("")}}>✕ クリア</button>
       </div>
 
       {/* コンテンツ */}
-      {currentTab==="today"    && <DayView which="today"/>}
-      {currentTab==="tomorrow" && <DayView which="tomorrow"/>}
-      {currentTab==="schedule" && <ScheduleView/>}
+      {currentTab==="today"&&(
+        <DayView which="today" tasks={tasks} taskMatchesFilter={taskMatchesFilter} toggleDone={toggleDone} setPreviewTask={setPreviewTask}/>
+      )}
+      {currentTab==="tomorrow"&&(
+        <DayView which="tomorrow" tasks={tasks} taskMatchesFilter={taskMatchesFilter} toggleDone={toggleDone} setPreviewTask={setPreviewTask}/>
+      )}
+      {currentTab==="schedule"&&(
+        <ScheduleView
+          tasks={tasks} viewDays={viewDays} navOffset={navOffset}
+          taskMatchesFilter={taskMatchesFilter} toggleDone={toggleDone}
+          deleteTaskById={deleteTaskById} setPreviewTask={setPreviewTask}
+          openModal={handleScheduleAction}
+        />
+      )}
 
       {/* プレビューカード */}
       {previewTask&&(
         <PreviewCard
           task={tasks.find(t=>t.id===previewTask.id)||previewTask}
           onClose={()=>setPreviewTask(null)}
+          toggleDone={toggleDone}
+          onEdit={()=>{
+            const t=tasks.find(x=>x.id===previewTask.id)||previewTask
+            setPreviewTask(null)
+            openModalForEdit(t)
+          }}
         />
       )}
 
       {/* 編集モーダル */}
-      {modalOpen&&<EditModal/>}
+      {modalOpen&&(
+        <EditModal
+          editId={editId}
+          taskText={taskText} setTaskText={setTaskText}
+          companyInput={companyInput} setCompanyInput={setCompanyInput}
+          personInput={personInput} setPersonInput={setPersonInput}
+          startDate={startDate} setStartDate={setStartDate}
+          endDate={endDate} setEndDate={setEndDate}
+          selectedColor={selectedColor} setSelectedColor={setSelectedColor}
+          assigneeHistory={assigneeHistory} setAssigneeHistory={setAssigneeHistory}
+          onSave={saveTask} onDelete={deleteTaskById}
+          onClose={()=>setModalOpen(false)}
+          taskTextRef={taskTextRef}
+        />
+      )}
     </div>
   )
 }
