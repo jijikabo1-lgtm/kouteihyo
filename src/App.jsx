@@ -169,6 +169,13 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-preview-done-btn{padding:15px 18px;border:2px solid #E2E8F0;background:#fff;color:#64748B;border-radius:14px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px}
 .kh-preview-done-btn.is-done{background:#DCFCE7;border-color:#86EFAC;color:#16A34A}
 .kh-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#D42020;color:#fff;padding:10px 20px;border-radius:12px;font-size:13px;font-weight:700;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.3);animation:kh-fadein 0.2s ease}
+.kh-offline-banner{position:fixed;top:60px;left:0;right:0;background:#D42020;color:#fff;padding:8px 16px;text-align:center;font-size:12px;font-weight:700;z-index:450;box-shadow:0 2px 8px rgba(0,0,0,0.3);animation:kh-slidedown 0.3s ease}
+@keyframes kh-slidedown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+.kh-help-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#192536;color:#F5C200;border:none;font-size:24px;font-weight:800;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:400;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
+.kh-help-btn:hover{transform:scale(1.1)}
+@media (max-width: 768px) {
+  .kh-help-btn{bottom:16px;right:16px;width:48px;height:48px;font-size:20px}
+}
 `
 
 // ────────────────────────────────────────────────
@@ -583,6 +590,27 @@ export default function App() {
     return () => window.removeEventListener("resize", handler)
   }, [])
 
+  // オンライン/オフライン状態の管理
+  const [isOnline, setIsOnline] = useState(() => typeof navigator !== "undefined" ? navigator.onLine : true)
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true)
+      showToast("✅ オンラインに戻りました")
+      loadTasks() // オンライン復帰時にデータを再読み込み
+    }
+    const handleOffline = () => {
+      setIsOnline(false)
+      showToast("⚠️ オフラインです。インターネット接続を確認してください")
+    }
+    
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [showToast, loadTasks])
+
   useEffect(() => {
     const style = document.createElement("style")
     style.setAttribute("data-kh", "1")
@@ -638,6 +666,12 @@ export default function App() {
   }, [loadTasks])
 
   const toggleDone = useCallback(async (id) => {
+    // オフラインチェック
+    if (!isOnline) {
+      showToast("⚠️ オフラインのため変更できません")
+      return
+    }
+    
     const task = tasks.find(t => t.id === id)
     if (!task) return
     const newDone = !task.done
@@ -681,14 +715,70 @@ export default function App() {
   const closeModal = useCallback(() => setModalOpen(false), [])
 
   const saveTask = useCallback(async () => {
-    const text = taskText.trim()
-    if (!text) {
-      showToast("作業内容を入力してください")
+    // オフラインチェック
+    if (!isOnline) {
+      showToast("⚠️ オフラインのため保存できません")
       return
+    }
+    
+    const text = taskText.trim()
+    
+    // バリデーション: 作業内容が空
+    if (!text) {
+      showToast("⚠️ 作業内容を入力してください")
+      taskTextRef.current?.focus()
+      return
+    }
+    
+    // バリデーション: 作業内容が長すぎる
+    if (text.length > 200) {
+      showToast("⚠️ 作業内容は200文字以内で入力してください")
+      return
+    }
+    
+    // バリデーション: 日付が未設定
+    if (!startDate || !endDate) {
+      showToast("⚠️ 開始日と終了日を設定してください")
+      return
+    }
+    
+    // バリデーション: 日付の妥当性チェック
+    const start = new Date(startDate)
+    const end = new Date(endDate)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    
+    // 1年以上前の日付は警告
+    const oneYearAgo = new Date(today)
+    oneYearAgo.setFullYear(today.getFullYear() - 1)
+    if (start < oneYearAgo) {
+      if (!window.confirm('開始日が1年以上前です。\nこの日付で登録してもよろしいですか？')) {
+        return
+      }
+    }
+    
+    // 1年以上先の日付は警告
+    const oneYearLater = new Date(today)
+    oneYearLater.setFullYear(today.getFullYear() + 1)
+    if (end > oneYearLater) {
+      if (!window.confirm('終了日が1年以上先です。\nこの日付で登録してもよろしいですか？')) {
+        return
+      }
     }
     
     const company  = companyInput.trim()
     const person   = personInput.trim()
+    
+    // バリデーション: 会社名・担当者名が長すぎる
+    if (company.length > 50) {
+      showToast("⚠️ 会社名は50文字以内で入力してください")
+      return
+    }
+    if (person.length > 30) {
+      showToast("⚠️ 担当者名は30文字以内で入力してください")
+      return
+    }
+    
     const assignee = assigneeLabel(company, person)
 
     if (company || person) {
@@ -747,6 +837,22 @@ export default function App() {
   }, [taskText, companyInput, personInput, editId, startDate, endDate, selectedColor, loadTasks, showToast])
 
   const deleteTaskById = useCallback(async (id) => {
+    // オフラインチェック
+    if (!isOnline) {
+      showToast("⚠️ オフラインのため削除できません")
+      return
+    }
+    
+    // 削除確認ダイアログ
+    const task = tasks.find(t => t.id === id)
+    const confirmMessage = task 
+      ? `「${task.text}」を削除してもよろしいですか？\n\nこの操作は取り消せません。`
+      : 'このタスクを削除してもよろしいですか？\n\nこの操作は取り消せません。'
+    
+    if (!window.confirm(confirmMessage)) {
+      return // キャンセルされた場合は何もしない
+    }
+
     const prevTasks = tasks
     setTasks(prev => prev.filter(t => t.id !== id))
     setModalOpen(false)
@@ -761,6 +867,7 @@ export default function App() {
         await loadTasks()
       } else {
         console.log("✅ タスクを削除しました:", id)
+        showToast("タスクを削除しました")
       }
     } catch (err) {
       console.error("予期しないエラー:", err)
@@ -873,6 +980,46 @@ export default function App() {
       )}
 
       {toastMsg && <div className="kh-toast">⚠️ {toastMsg}</div>}
+      
+      {/* オフラインバナー */}
+      {!isOnline && (
+        <div className="kh-offline-banner">
+          ⚠️ オフラインです - インターネット接続を確認してください
+        </div>
+      )}
+      
+      {/* ヘルプボタン */}
+      <button className="kh-help-btn" 
+        onClick={() => {
+          const helpText = `📋 工程表アプリの使い方
+
+【基本操作】
+• カレンダーの日付をクリックでタスク追加
+• タスクをクリックで詳細表示
+• 編集画面から修正・削除が可能
+
+【タブ機能】
+• 今日：本日の作業一覧
+• 明日：明日の作業一覧  
+• 工程表：カレンダー表示（7/14/28日）
+
+【フィルター】
+• 担当者名で検索
+• 工種別に絞り込み
+
+【工種の色分け】
+🟠 構造　🔵 設備　🟢 内装
+🔴 検査　🟡 定例　🟣 搬入
+⚫ その他
+
+【注意事項】
+⚠️ 削除は取り消せません
+⚠️ オフラインでは操作できません
+⚠️ ブラウザのキャッシュクリアで担当者履歴が消えます`
+          alert(helpText)
+        }}
+        aria-label="使い方を表示"
+        title="使い方">?</button>
     </div>
   )
 }
