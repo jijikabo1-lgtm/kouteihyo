@@ -210,7 +210,8 @@ const DayView = memo(function DayView({ which, filteredTasks, toggleDone, setPre
                 </div>
                 <div className="kh-card-right">
                   <button className={`kh-card-done-btn${t.done ? " checked" : ""}`}
-                    onClick={e => { e.stopPropagation(); toggleDone(t.id) }}>✓</button>
+                    onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
+                    aria-label={t.done ? "未完了に戻す" : "完了にする"}>✓</button>
                 </div>
               </div>
             )
@@ -231,7 +232,6 @@ const ScheduleView = memo(function ScheduleView({
   filteredTasks, viewDays, base, navLabel, colDates,
   toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, isMobile, todayKey
 }) {
-  // ✅ fix⑦: useMemoでlayoutTasksの再計算を抑制
   const laidOut = useMemo(
     () => layoutTasks(filteredTasks, viewDays, base),
     [filteredTasks, viewDays, base]
@@ -247,9 +247,9 @@ const ScheduleView = memo(function ScheduleView({
   return (
     <>
       <div className="kh-nav">
-        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o - 1)}>◀ 前週</button>
+        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o - 1)} aria-label="前週に移動">◀ 前週</button>
         <span className="kh-nav-label">{navLabel}</span>
-        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o + 1)}>次週 ▶</button>
+        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o + 1)} aria-label="次週に移動">次週 ▶</button>
       </div>
       {isMobile && viewDays > 7 && (
         <div className="kh-zoom-hint">🔍 ピンチ操作で拡大できます</div>
@@ -265,7 +265,12 @@ const ScheduleView = memo(function ScheduleView({
                   const dow = date.getDay(), key = toKey(date), isToday = key === todayKey
                   const cls = isToday ? "today" : dow === 0 ? "sun" : dow === 6 ? "sat" : ""
                   return (
-                    <div key={di} className={`kh-day-cell${cls ? " " + cls : ""}`} onClick={() => openModal(key)}>
+                    <div key={di} className={`kh-day-cell${cls ? " " + cls : ""}`} 
+                      onClick={() => openModal(key)}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${date.getMonth() + 1}月${date.getDate()}日 タスクを追加`}
+                      onKeyDown={e => e.key === "Enter" && openModal(key)}>
                       <div className="kh-day-left">
                         <span className={`kh-dow${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>{DAYS_JA[dow]}</span>
                         <span className={`kh-dnum${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>{date.getDate()}</span>
@@ -305,7 +310,11 @@ const ScheduleView = memo(function ScheduleView({
                         paddingRight: eh ? 4 : 2,
                         zIndex: 10
                       }}
-                      onClick={() => setPreviewTask(t)}>
+                      onClick={() => setPreviewTask(t)}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`タスク: ${t.text}`}
+                      onKeyDown={e => e.key === "Enter" && setPreviewTask(t)}>
                       {!sh && <span style={{marginRight:2,opacity:0.8,fontSize:8}}>◀</span>}
                       <span className="kh-bar-text" style={{flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>
                         {t.assignee && <span style={{opacity:0.7,marginRight:2}}>{t.assignee}</span>}
@@ -315,9 +324,11 @@ const ScheduleView = memo(function ScheduleView({
                       {eh && (
                         <>
                           <button className={`kh-done-check${t.done ? " checked" : ""}`}
-                            onClick={e => { e.stopPropagation(); toggleDone(t.id) }}>{t.done ? "✓" : ""}</button>
+                            onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
+                            aria-label={t.done ? "未完了に戻す" : "完了にする"}>{t.done ? "✓" : ""}</button>
                           <button onClick={e => { e.stopPropagation(); deleteTaskById(t.id) }}
-                            style={{marginLeft:2,background:"rgba(0,0,0,0.25)",border:"none",borderRadius:3,color:"#fff",fontSize:8,cursor:"pointer",padding:"1px 3px",flexShrink:0}}>✕</button>
+                            style={{marginLeft:2,background:"rgba(0,0,0,0.25)",border:"none",borderRadius:3,color:"#fff",fontSize:8,cursor:"pointer",padding:"1px 3px",flexShrink:0}}
+                            aria-label="タスクを削除">✕</button>
                         </>
                       )}
                     </div>
@@ -343,6 +354,13 @@ const ScheduleView = memo(function ScheduleView({
 // PreviewCard
 // ────────────────────────────────────────────────
 const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openModal }) {
+  // Escキーでモーダルを閉じる
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [onClose])
+
   if (!task) return null
   const c = COLORS.find(x => x.id === task.color) || COLORS[0]
   const s = parseKey(task.start_key), e = parseKey(task.end_key)
@@ -356,7 +374,7 @@ const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openM
             <div className="kh-preview-type-badge">🏗 {c.label}</div>
             <div className="kh-preview-title">{task.text}</div>
           </div>
-          <button className="kh-preview-close" onClick={onClose}>×</button>
+          <button className="kh-preview-close" onClick={onClose} aria-label="閉じる">×</button>
         </div>
         <div className="kh-preview-body">
           {task.done && <div className="kh-preview-done-badge">✅ 完了済み</div>}
@@ -410,15 +428,26 @@ const EditModal = memo(function EditModal({
 }) {
   const isEdit = editId !== null
 
-  // ✅ fix①: 開始日変更時は終了日を補正
+  // Escキーでモーダルを閉じる
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") closeModal() }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [closeModal])
+
+  // 開始日変更時は終了日を補正（開始日より前にならないように）
   const onStartChange = (v) => {
     setStartDate(v)
     if (v > endDate) setEndDate(v)
   }
 
-  // ✅ fix①: 終了日変更時も開始日より前にならないよう補正
+  // 終了日変更時も開始日より前にならないよう補正
   const onEndChange = (v) => {
-    setEndDate(v < startDate ? startDate : v)
+    if (v < startDate) {
+      setEndDate(startDate)
+    } else {
+      setEndDate(v)
+    }
   }
 
   return (
@@ -434,14 +463,19 @@ const EditModal = memo(function EditModal({
         <input ref={taskTextRef} className="kh-task-input" value={taskText}
           onChange={e => setTaskText(e.target.value)}
           onKeyDown={e => e.key === "Enter" && saveTask()}
-          placeholder="例：1F 配筋検査 13:00〜"/>
+          placeholder="例：1F 配筋検査 13:00〜"
+          aria-label="作業内容"/>
         <div className="kh-assignee-wrap">
           <div className="kh-field-label">🏢 担当</div>
           <div className="kh-assignee-row">
             <input className="kh-assignee-input" value={companyInput}
-              onChange={e => setCompanyInput(e.target.value)} placeholder="会社名（例：山田工務店）"/>
+              onChange={e => setCompanyInput(e.target.value)} 
+              placeholder="会社名（例：山田工務店）"
+              aria-label="会社名"/>
             <input className="kh-assignee-input" value={personInput}
-              onChange={e => setPersonInput(e.target.value)} placeholder="担当者名（例：田中）"/>
+              onChange={e => setPersonInput(e.target.value)} 
+              placeholder="担当者名（例：田中）"
+              aria-label="担当者名"/>
           </div>
           {assigneeHistory.length > 0 && (
             <>
@@ -450,11 +484,13 @@ const EditModal = memo(function EditModal({
                 {assigneeHistory.map((h, i) => (
                   <div key={i} className="kh-history-item">
                     <button className="kh-history-name"
-                      onClick={() => { setCompanyInput(h.company || ""); setPersonInput(h.person || "") }}>
+                      onClick={() => { setCompanyInput(h.company || ""); setPersonInput(h.person || "") }}
+                      aria-label={`履歴から選択: ${h.company || ""} ${h.person || ""}`}>
                       {h.company && h.person ? `${h.company} ${h.person}` : h.company || h.person}
                     </button>
                     <button className="kh-history-del"
-                      onClick={() => setAssigneeHistory(prev => prev.filter((_, j) => j !== i))}>×</button>
+                      onClick={() => setAssigneeHistory(prev => prev.filter((_, j) => j !== i))}
+                      aria-label="履歴を削除">×</button>
                   </div>
                 ))}
               </div>
@@ -471,22 +507,25 @@ const EditModal = memo(function EditModal({
                 outline: selectedColor === c.id ? `3px solid ${c.bg}` : "none",
                 outlineOffset: 2
               }}
-              onClick={() => setSelectedColor(c.id)}>🏗 {c.label}</button>
+              onClick={() => setSelectedColor(c.id)}
+              aria-label={`工種: ${c.label}`}
+              aria-pressed={selectedColor === c.id}>🏗 {c.label}</button>
           ))}
         </div>
         <div className="kh-date-row">
           <div className="kh-date-col">
             <div className="kh-field-label">📅 開始日</div>
             <input type="date" className="kh-date-input" value={startDate}
-              onChange={e => onStartChange(e.target.value)}/>
+              onChange={e => onStartChange(e.target.value)}
+              aria-label="開始日"/>
           </div>
           <div style={{fontSize:20,color:"#C8C3BA",paddingBottom:8}}>→</div>
           <div className="kh-date-col">
             <div className="kh-field-label">🏁 終了日</div>
-            {/* ✅ fix①: 終了日バリデーション追加 */}
             <input type="date" className="kh-date-input" value={endDate}
               min={startDate}
-              onChange={e => onEndChange(e.target.value)}/>
+              onChange={e => onEndChange(e.target.value)}
+              aria-label="終了日"/>
           </div>
         </div>
         <button className="kh-save-btn" onClick={saveTask}>{isEdit ? "更新する" : "追加する"}</button>
@@ -499,7 +538,6 @@ const EditModal = memo(function EditModal({
 // App (Main)
 // ────────────────────────────────────────────────
 export default function App() {
-  // ✅ fix②: now/todayKey/baseStartをstateで管理し、日付をまたいでも正確に
   const [now] = useState(() => new Date())
   const todayKey  = toKey(now)
   const baseStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay())
@@ -521,7 +559,7 @@ export default function App() {
   const [endDate, setEndDate]                 = useState("")
   const [toastMsg, setToastMsg]               = useState("")
 
-  // ✅ fix③: 担当者履歴をlocalStorageで永続化
+  // 担当者履歴をlocalStorageで永続化
   const [assigneeHistory, setAssigneeHistory] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("kh_assignee_history") || "[]")
@@ -533,10 +571,9 @@ export default function App() {
 
   const taskTextRef     = useRef(null)
   const suppressRTRef   = useRef(false)
-  // ✅ fix⑤: suppressTimerの参照を保持して競合を防ぐ
   const suppressTimerRef = useRef(null)
 
-  // ✅ fix⑥: isMobileをstateで管理しリサイズに追従
+  // isMobileをstateで管理しリサイズに追従
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768)
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth <= 768)
@@ -559,28 +596,39 @@ export default function App() {
   }, [])
 
   const loadTasks = useCallback(async () => {
-    const { data, error } = await supabase.from("tasks").select("*").order("start_key")
-    // ✅ fix④: ロードエラーを検知
-    if (error) {
-      showToast("データの取得に失敗しました")
-      return
+    try {
+      const { data, error } = await supabase.from("tasks").select("*").order("start_key")
+      if (error) {
+        console.error("データ取得エラー:", error)
+        showToast("データの取得に失敗しました")
+        return
+      }
+      if (data) {
+        setTasks(data.map(t => ({ ...t, done: t.done || false })))
+        console.log(`✅ ${data.length}件のタスクを読み込みました`)
+      }
+    } catch (err) {
+      console.error("予期しないエラー:", err)
+      showToast("データの取得中にエラーが発生しました")
     }
-    if (data) setTasks(data.map(t => ({ ...t, done: t.done || false })))
   }, [showToast])
 
   useEffect(() => {
     loadTasks()
     const channel = supabase
       .channel("tasks-rt")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks" }, () => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks" }, (payload) => {
+        console.log("🔔 新規タスク追加:", payload)
         if (!suppressRTRef.current) loadTasks()
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks" }, ({ new: rec }) => {
+        console.log("🔔 タスク更新:", rec)
         if (suppressRTRef.current) return
         setTasks(prev => prev.map(t => t.id === rec.id ? { ...rec, done: rec.done || false } : t))
         setPreviewTask(prev => prev && prev.id === rec.id ? { ...rec, done: rec.done || false } : prev)
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks" }, ({ old: rec }) => {
+        console.log("🔔 タスク削除:", rec)
         setTasks(prev => prev.filter(t => t.id !== rec.id))
       })
       .subscribe()
@@ -591,15 +639,27 @@ export default function App() {
     const task = tasks.find(t => t.id === id)
     if (!task) return
     const newDone = !task.done
+    const prevDone = task.done
+    
     // 楽観的更新
     setTasks(prev => prev.map(t => t.id === id ? { ...t, done: newDone } : t))
     setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: newDone } : prev)
-    // ✅ fix④: エラー時にロールバック
-    const { error } = await supabase.from("tasks").update({ done: newDone }).eq("id", id)
-    if (error) {
-      showToast("更新に失敗しました")
-      setTasks(prev => prev.map(t => t.id === id ? { ...t, done: task.done } : t))
-      setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: task.done } : prev)
+    
+    try {
+      const { error } = await supabase.from("tasks").update({ done: newDone }).eq("id", id)
+      if (error) {
+        console.error("完了状態更新エラー:", error)
+        showToast("更新に失敗しました")
+        // ロールバック
+        setTasks(prev => prev.map(t => t.id === id ? { ...t, done: prevDone } : t))
+        setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: prevDone } : prev)
+      }
+    } catch (err) {
+      console.error("予期しないエラー:", err)
+      showToast("更新中にエラーが発生しました")
+      // ロールバック
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, done: prevDone } : t))
+      setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: prevDone } : prev)
     }
   }, [tasks, showToast])
 
@@ -620,7 +680,11 @@ export default function App() {
 
   const saveTask = useCallback(async () => {
     const text = taskText.trim()
-    if (!text) return
+    if (!text) {
+      showToast("作業内容を入力してください")
+      return
+    }
+    
     const company  = companyInput.trim()
     const person   = personInput.trim()
     const assignee = assigneeLabel(company, person)
@@ -632,52 +696,77 @@ export default function App() {
       })
     }
 
-    // ✅ fix⑤: 既存タイマーをクリアしてから再セット
+    // 既存タイマーをクリアしてから再セット
     suppressRTRef.current = true
-    clearTimeout(suppressTimerRef.current)
+    if (suppressTimerRef.current) {
+      clearTimeout(suppressTimerRef.current)
+    }
 
     setModalOpen(false)
 
-    // ✅ fix④: 保存エラーをトーストで通知しロールバック
-    if (editId) {
-      const { error } = await supabase.from("tasks")
-        .update({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor })
-        .eq("id", editId)
-      if (error) {
-        showToast("更新に失敗しました: " + error.message)
-        suppressRTRef.current = false
-        await loadTasks()
-        return
+    try {
+      if (editId) {
+        const { error } = await supabase.from("tasks")
+          .update({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor })
+          .eq("id", editId)
+        if (error) {
+          console.error("更新エラー:", error)
+          showToast("更新に失敗しました: " + error.message)
+          suppressRTRef.current = false
+          await loadTasks()
+          return
+        }
+        console.log("✅ タスクを更新しました:", editId)
+      } else {
+        const { error } = await supabase.from("tasks")
+          .insert({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, done: false })
+        if (error) {
+          console.error("保存エラー:", error)
+          showToast("保存に失敗しました: " + error.message)
+          suppressRTRef.current = false
+          await loadTasks()
+          return
+        }
+        console.log("✅ タスクを追加しました")
       }
-    } else {
-      const { error } = await supabase.from("tasks")
-        .insert({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, done: false })
-      if (error) {
-        showToast("保存に失敗しました: " + error.message)
+
+      await loadTasks()
+
+      suppressTimerRef.current = setTimeout(() => {
         suppressRTRef.current = false
-        await loadTasks()
-        return
-      }
-    }
-
-    await loadTasks()
-
-    suppressTimerRef.current = setTimeout(() => {
+        console.log("✅ リアルタイム更新の抑制を解除しました")
+      }, 2000)
+    } catch (err) {
+      console.error("予期しないエラー:", err)
+      showToast("保存中にエラーが発生しました")
       suppressRTRef.current = false
-    }, 2000)
+      await loadTasks()
+    }
   }, [taskText, companyInput, personInput, editId, startDate, endDate, selectedColor, loadTasks, showToast])
 
   const deleteTaskById = useCallback(async (id) => {
+    const prevTasks = tasks
     setTasks(prev => prev.filter(t => t.id !== id))
     setModalOpen(false)
     setPreviewTask(null)
-    // ✅ fix④: 削除エラー検知
-    const { error } = await supabase.from("tasks").delete().eq("id", id)
-    if (error) {
-      showToast("削除に失敗しました")
+    
+    try {
+      const { error } = await supabase.from("tasks").delete().eq("id", id)
+      if (error) {
+        console.error("削除エラー:", error)
+        showToast("削除に失敗しました")
+        setTasks(prevTasks)
+        await loadTasks()
+      } else {
+        console.log("✅ タスクを削除しました:", id)
+      }
+    } catch (err) {
+      console.error("予期しないエラー:", err)
+      showToast("削除中にエラーが発生しました")
+      setTasks(prevTasks)
       await loadTasks()
     }
-  }, [loadTasks, showToast])
+  }, [tasks, loadTasks, showToast])
 
   const base      = addDays(baseStart, navOffset * 7)
   const colDates  = Array.from({ length: viewDays }, (_, i) => addDays(base, i))
@@ -710,7 +799,8 @@ export default function App() {
                   background: viewDays === n ? "#F5C200" : "rgba(255,255,255,0.15)",
                   color: viewDays === n ? "#192536" : "#fff"
                 }}
-                onClick={() => setViewDays(n)}>{n}日</button>
+                onClick={() => setViewDays(n)}
+                aria-pressed={viewDays === n}>{n}日</button>
             ))}
           </div>
         )}
@@ -722,21 +812,26 @@ export default function App() {
           { id: "schedule", label: "📋 工程表" }
         ].map(tab => (
           <button key={tab.id} className={`kh-tab${currentTab === tab.id ? " active" : ""}`}
-            onClick={() => setCurrentTab(tab.id)}>{tab.label}</button>
+            onClick={() => setCurrentTab(tab.id)}
+            aria-selected={currentTab === tab.id}
+            role="tab">{tab.label}</button>
         ))}
       </div>
       <div className="kh-filter-bar">
         <input placeholder="🏢 担当で絞り込み" value={filterName}
-          onChange={e => setFilterName(e.target.value)}/>
+          onChange={e => setFilterName(e.target.value)}
+          aria-label="担当で絞り込み"/>
         <div className="kh-filter-chips">
           {COLORS.map(c => (
             <button key={c.id} className={`kh-chip${filterColor === c.id ? " active" : ""}`}
               style={filterColor === c.id ? { background: c.bg } : {}}
-              onClick={() => setFilterColor(filterColor === c.id ? "" : c.id)}>{c.label}</button>
+              onClick={() => setFilterColor(filterColor === c.id ? "" : c.id)}
+              aria-pressed={filterColor === c.id}>{c.label}</button>
           ))}
         </div>
         <button className="kh-filter-clear"
-          onClick={() => { setFilterName(""); setFilterColor("") }}>✕ クリア</button>
+          onClick={() => { setFilterName(""); setFilterColor("") }}
+          aria-label="フィルタをクリア">✕ クリア</button>
       </div>
 
       {currentTab === "today" && (
@@ -775,7 +870,6 @@ export default function App() {
           closeModal={closeModal} taskTextRef={taskTextRef}/>
       )}
 
-      {/* ✅ fix④: エラートースト */}
       {toastMsg && <div className="kh-toast">⚠️ {toastMsg}</div>}
     </div>
   )
