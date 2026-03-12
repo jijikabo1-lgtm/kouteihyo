@@ -71,18 +71,25 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-grid-wrap{padding:0 8px 16px}
 .kh-week-block{margin-bottom:8px}
 .kh-day-header{display:grid;gap:2px;margin-bottom:2px}
-.kh-day-cell{background:#fff;border:1px solid #D5D0C8;border-radius:5px;padding:2px 3px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;min-height:28px;overflow:hidden}
+.kh-day-cell{background:#fff;border:1px solid #D5D0C8;border-radius:5px;padding:4px 5px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;min-height:32px;overflow:hidden}
 .kh-day-cell:hover{opacity:0.85}
 .kh-day-cell.today{background:#F5C200;border:2px solid #C8A200}
 .kh-day-cell.sun{background:#FFECEC}
 .kh-day-cell.sat{background:#ECEFFF}
-.kh-day-left{display:flex;align-items:baseline;gap:2px}
-.kh-dow{font-size:9px;font-weight:800;color:#888;flex-shrink:0}
+.kh-day-left{display:flex;align-items:baseline;gap:1px;white-space:nowrap}
+.kh-dow{font-size:10px;font-weight:700;color:#888;flex-shrink:0}
 .kh-dow.sun{color:#B00}.kh-dow.sat{color:#006}
-.kh-dnum{font-size:13px;font-weight:900;color:#1C2B3A;flex-shrink:0}
+.kh-dnum{font-size:14px;font-weight:900;color:#1C2B3A;flex-shrink:0}
 .kh-dnum.sun{color:#C00}.kh-dnum.sat{color:#006}
-.kh-dmonth{font-size:7px;color:#AAA;flex-shrink:0}
-.kh-plus{font-size:11px;color:#CCC;flex-shrink:0}
+.kh-dmonth{font-size:11px;color:#666;font-weight:700;flex-shrink:0}
+.kh-plus{font-size:12px;color:#BBB;flex-shrink:0}
+@media (max-width: 768px) {
+  .kh-day-cell{padding:3px 4px;min-height:28px}
+  .kh-dmonth{font-size:10px}
+  .kh-dnum{font-size:12px}
+  .kh-dow{font-size:9px}
+  .kh-plus{font-size:10px}
+}
 .kh-task-area{position:relative;background:rgba(255,255,255,0.5);border-radius:6px;border:1px solid #D5D0C8;overflow:hidden}
 .kh-col-grid{position:absolute;inset:0;display:grid;pointer-events:none}
 .kh-col-div{border-right:1px dashed #E0DBD3}
@@ -272,9 +279,9 @@ const ScheduleView = memo(function ScheduleView({
                       aria-label={`${date.getMonth() + 1}月${date.getDate()}日 タスクを追加`}
                       onKeyDown={e => e.key === "Enter" && openModal(key)}>
                       <div className="kh-day-left">
-                        <span className={`kh-dow${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>{DAYS_JA[dow]}</span>
+                        <span className="kh-dmonth">{date.getMonth() + 1}/</span>
                         <span className={`kh-dnum${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>{date.getDate()}</span>
-                        <span className="kh-dmonth">{date.getMonth() + 1}月</span>
+                        <span className={`kh-dow${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>({DAYS_JA[dow]})</span>
                       </div>
                       <span className="kh-plus">＋</span>
                     </div>
@@ -322,14 +329,9 @@ const ScheduleView = memo(function ScheduleView({
                       </span>
                       {!eh && <span style={{marginLeft:2,opacity:0.8,fontSize:8}}>▶</span>}
                       {eh && (
-                        <>
-                          <button className={`kh-done-check${t.done ? " checked" : ""}`}
-                            onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
-                            aria-label={t.done ? "未完了に戻す" : "完了にする"}>{t.done ? "✓" : ""}</button>
-                          <button onClick={e => { e.stopPropagation(); deleteTaskById(t.id) }}
-                            style={{marginLeft:2,background:"rgba(0,0,0,0.25)",border:"none",borderRadius:3,color:"#fff",fontSize:8,cursor:"pointer",padding:"1px 3px",flexShrink:0}}
-                            aria-label="タスクを削除">✕</button>
-                        </>
+                        <button className={`kh-done-check${t.done ? " checked" : ""}`}
+                          onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
+                          aria-label={t.done ? "未完了に戻す" : "完了にする"}>{t.done ? "✓" : ""}</button>
                       )}
                     </div>
                   )
@@ -544,7 +546,7 @@ export default function App() {
 
   const [tasks, setTasks]                     = useState([])
   const [navOffset, setNavOffset]             = useState(0)
-  const [viewDays, setViewDays]               = useState(14)
+  const [viewDays, setViewDays]               = useState(28)
   const [currentTab, setCurrentTab]           = useState("schedule")
   const [filterName, setFilterName]           = useState("")
   const [filterColor, setFilterColor]         = useState("")
