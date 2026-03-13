@@ -171,23 +171,36 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#D42020;color:#fff;padding:10px 20px;border-radius:12px;font-size:13px;font-weight:700;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.3);animation:kh-fadein 0.2s ease}
 .kh-print-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#192536;color:#F5C200;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:400;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
 .kh-print-btn:hover{transform:scale(1.1)}
-.kh-print-task-list{display:none}
+.kh-print-header{display:none}
 @media print {
-  body{background:#fff}
-  .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-legend,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn{display:none !important}
-  .kh-grid-wrap{padding:16px 0}
-  .kh-week-block{page-break-inside:avoid;margin-bottom:16px}
-  .kh-day-header{display:grid;gap:1px;margin-bottom:8px}
-  .kh-day-cell{background:#fff;border:1px solid #333;border-radius:0;padding:4px 6px;min-height:auto}
+  @page {
+    size: landscape;
+    margin: 10mm;
+  }
+  body{background:#fff;margin:0;padding:0}
+  .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn{display:none !important}
+  .kh-print-header{display:block !important;font-size:16px;font-weight:900;text-align:center;padding:8px 0 6px;border-bottom:2px solid #192536;margin-bottom:10px}
+  .kh-grid-wrap{padding:0;margin:0}
+  .kh-week-block{page-break-inside:avoid;margin-bottom:12px}
+  .kh-day-header{display:grid;gap:1px;margin-bottom:2px;grid-template-columns:repeat(7,1fr)}
+  .kh-day-cell{background:#fff;border:1px solid #666;border-radius:0;padding:3px 4px;min-height:24px;cursor:default}
+  .kh-day-cell:hover{opacity:1}
   .kh-day-cell.today{background:#ffffcc;border:2px solid #000}
-  .kh-task-area{display:none}
-  .kh-print-task-list{display:block !important}
-  .kh-print-header{font-size:18px;font-weight:900;padding:12px 16px;background:#f5f5f5;border-bottom:3px solid #192536;margin-bottom:16px}
-  .kh-print-week-title{font-size:14px;font-weight:800;padding:8px 12px;background:#e8e8e8;border-left:4px solid #192536;margin:16px 0 8px}
-  .kh-print-task{padding:8px 12px;border-left:4px solid;margin-bottom:6px;page-break-inside:avoid;background:#fafafa}
-  .kh-print-task-title{font-size:13px;font-weight:800;color:#000;margin-bottom:4px}
-  .kh-print-task-meta{font-size:11px;color:#555;display:flex;gap:12px;flex-wrap:wrap}
-  .kh-print-task-meta span{white-space:nowrap}
+  .kh-day-cell.sun{background:#fff5f5;border-color:#c00}
+  .kh-day-cell.sat{background:#f5f5ff;border-color:#006}
+  .kh-day-left{gap:2px}
+  .kh-dmonth{font-size:9px}
+  .kh-dnum{font-size:11px}
+  .kh-dow{font-size:8px}
+  .kh-plus{display:none}
+  .kh-task-area{display:block !important;position:relative;background:#fff;border:1px solid #666;border-top:none;min-height:80px}
+  .kh-col-grid{display:none}
+  .kh-task-bar{box-shadow:none;border:1px solid rgba(0,0,0,0.3);font-size:8px;padding-left:3px !important;padding-right:3px !important}
+  .kh-task-bar .kh-bar-text{font-size:8px;line-height:1.2}
+  .kh-done-check{display:none}
+  .kh-legend{display:flex !important;padding:6px 0;gap:8px;justify-content:center;page-break-before:avoid}
+  .kh-legend-item{font-size:9px}
+  .kh-legend-dot{width:10px;height:10px}
 }
 `
 
@@ -273,6 +286,7 @@ const ScheduleView = memo(function ScheduleView({
 
   return (
     <>
+      <div className="kh-print-header">工程表 - {navLabel}</div>
       <div className="kh-nav">
         <button className="kh-nav-btn" onClick={() => setNavOffset(o => o - 1)} aria-label="前週に移動">◀ 前週</button>
         <span className="kh-nav-label">{navLabel}</span>
@@ -367,44 +381,6 @@ const ScheduleView = memo(function ScheduleView({
             <div className="kh-legend-dot" style={{background:c.bg}}/>{c.label}
           </div>
         ))}
-      </div>
-      
-      {/* 印刷用タスクリスト */}
-      <div className="kh-print-task-list">
-        <div className="kh-print-header">工程表 - {navLabel}</div>
-        {weeks.map(({ wo, days: week }) => {
-          const weekStart = week[0]
-          const weekEnd = week[week.length - 1]
-          const weekTasks = laidOut.filter(t => t.endCol >= wo && t.col < wo + week.length)
-          if (weekTasks.length === 0) return null
-          return (
-            <div key={wo}>
-              <div className="kh-print-week-title">
-                {weekStart.getMonth() + 1}月{weekStart.getDate()}日 〜 {weekEnd.getMonth() + 1}月{weekEnd.getDate()}日
-              </div>
-              {weekTasks.map(t => {
-                const c = COLORS.find(x => x.id === t.color) || COLORS[0]
-                const s = parseKey(t.start_key)
-                const e = parseKey(t.end_key)
-                const days = diffDays(s, e) + 1
-                return (
-                  <div key={t.id} className="kh-print-task" style={{borderLeftColor: c.bg}}>
-                    <div className="kh-print-task-title">
-                      {t.done && "✓ "}
-                      {t.text}
-                    </div>
-                    <div className="kh-print-task-meta">
-                      <span>【{c.label}】</span>
-                      {t.assignee && <span>担当: {t.assignee}</span>}
-                      <span>期間: {s.getMonth()+1}/{s.getDate()} 〜 {e.getMonth()+1}/{e.getDate()} ({days}日間)</span>
-                      {t.done && <span style={{color: "#16A34A", fontWeight: 800}}>✅完了</span>}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )
-        })}
       </div>
     </>
   )
