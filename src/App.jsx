@@ -172,13 +172,32 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-print-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#192536;color:#F5C200;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:400;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
 .kh-print-btn:hover{transform:scale(1.1)}
 .kh-print-header{display:none}
+.kh-print-tab{width:100%;height:calc(100vh - 140px);display:flex;flex-direction:column;background:#f8f9fa}
+.kh-print-toolbar{background:#192536;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #F5C200;flex-shrink:0}
+.kh-print-tool-btn{padding:10px 20px;background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s}
+.kh-print-tool-btn:hover{background:rgba(255,255,255,0.2);transform:translateY(-1px)}
+.kh-print-execute{background:#F5C200;color:#192536;border-color:#F5C200}
+.kh-print-execute:hover{background:#ffd700}
+.kh-print-hint{color:#94a3b8;font-size:12px;margin-left:auto}
+.kh-print-canvas{flex:1;position:relative;overflow:auto;background:#fff;padding:20px}
+.kh-print-memo{position:absolute;background:#fff9c4;border:2px solid #ffd700;border-radius:6px;padding:8px 12px;cursor:move;box-shadow:0 2px 8px rgba(0,0,0,0.15);color:#000;font-weight:600;min-width:100px;user-select:none}
+.kh-print-memo:hover{box-shadow:0 4px 12px rgba(0,0,0,0.25)}
+.kh-print-memo-delete{position:absolute;top:-10px;right:-10px;width:24px;height:24px;border-radius:50%;background:#D42020;color:#fff;border:none;font-size:14px;cursor:pointer;display:none}
+.kh-print-memo:hover .kh-print-memo-delete{display:flex;align-items:center;justify-content:center}
+.kh-print-memo-controls{display:none;position:absolute;bottom:-36px;left:0;background:#192536;border-radius:6px;padding:4px;gap:4px}
+.kh-print-memo:hover .kh-print-memo-controls{display:flex}
+.kh-print-memo-controls button{background:#fff;border:none;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;border-radius:4px}
+.kh-print-memo-controls button:hover{background:#F5C200}
 @media print {
   @page {
     size: A4 landscape;
     margin: 4mm 6mm;
   }
   body{background:#fff;margin:0;padding:0}
-  .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn,.kh-day-btns{display:none !important}
+  .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn,.kh-day-btns,.kh-print-toolbar{display:none !important}
+  .kh-print-canvas{padding:0 !important;overflow:visible !important}
+  .kh-print-memo{background:transparent !important;border:none !important;box-shadow:none !important;padding:4px !important;cursor:default !important}
+  .kh-print-memo-delete,.kh-print-memo-controls{display:none !important}
   .kh-print-header{display:block !important;font-size:13px;font-weight:900;text-align:center;padding:1px 0;border-bottom:2px solid #000;margin-bottom:1px}
   .kh-grid-wrap{padding:0;margin:0;display:flex;flex-direction:column;min-height:0}
   .kh-week-block{page-break-inside:avoid;margin-bottom:1px;flex:1;display:flex;flex-direction:column;min-height:0}
@@ -457,6 +476,97 @@ const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openM
 })
 
 // ────────────────────────────────────────────────
+// PrintTab - 印刷専用タブ
+// ────────────────────────────────────────────────
+const PrintTab = memo(function PrintTab({
+  filteredTasks, viewDays, base, navLabel, colDates, isMobile,
+  toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, todayKey,
+  printMemos, setPrintMemos
+}) {
+  const canvasRef = useRef(null)
+  
+  const addMemo = () => {
+    setPrintMemos([...printMemos, {
+      id: Date.now(),
+      text: "メモを入力",
+      x: 100,
+      y: 100,
+      fontSize: 14,
+      fontWeight: "normal"
+    }])
+  }
+  
+  const updateMemo = (id, updates) => {
+    setPrintMemos(printMemos.map(m => m.id === id ? {...m, ...updates} : m))
+  }
+  
+  const deleteMemo = (id) => {
+    setPrintMemos(printMemos.filter(m => m.id !== id))
+  }
+  
+  const handlePrintClick = () => {
+    window.print()
+  }
+  
+  return (
+    <div className="kh-print-tab">
+      <div className="kh-print-toolbar">
+        <button className="kh-print-tool-btn" onClick={addMemo}>
+          ➕ メモ追加
+        </button>
+        <button className="kh-print-tool-btn kh-print-execute" onClick={handlePrintClick}>
+          🖨️ 印刷する
+        </button>
+        <div className="kh-print-hint">
+          メモをドラッグして移動、ダブルクリックで編集できます
+        </div>
+      </div>
+      <div className="kh-print-canvas" ref={canvasRef}>
+        <ScheduleView
+          filteredTasks={filteredTasks} viewDays={viewDays} base={base}
+          navLabel={navLabel} colDates={colDates} isMobile={false}
+          toggleDone={toggleDone} deleteTaskById={deleteTaskById}
+          setNavOffset={setNavOffset} openModal={openModal}
+          setPreviewTask={setPreviewTask} todayKey={todayKey}/>
+        {printMemos.map(memo => (
+          <div
+            key={memo.id}
+            className="kh-print-memo"
+            style={{
+              left: memo.x,
+              top: memo.y,
+              fontSize: memo.fontSize,
+              fontWeight: memo.fontWeight
+            }}
+            draggable
+            onDragEnd={(e) => {
+              const rect = canvasRef.current?.getBoundingClientRect()
+              if (rect) {
+                updateMemo(memo.id, {
+                  x: e.clientX - rect.left - 50,
+                  y: e.clientY - rect.top - 10
+                })
+              }
+            }}
+            onDoubleClick={() => {
+              const newText = prompt("メモを入力:", memo.text)
+              if (newText !== null) updateMemo(memo.id, {text: newText})
+            }}>
+            {memo.text}
+            <button className="kh-print-memo-delete" onClick={() => deleteMemo(memo.id)}>×</button>
+            <div className="kh-print-memo-controls">
+              <button onClick={() => updateMemo(memo.id, {fontSize: memo.fontSize + 2})}>A+</button>
+              <button onClick={() => updateMemo(memo.id, {fontSize: Math.max(8, memo.fontSize - 2)})}>A-</button>
+              <button onClick={() => updateMemo(memo.id, {fontWeight: memo.fontWeight === "bold" ? "normal" : "bold"})}>B</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+})
+
+// ────────────────────────────────────────────────
 // EditModal
 // ────────────────────────────────────────────────
 const EditModal = memo(function EditModal({
@@ -596,6 +706,9 @@ export default function App() {
   const [startDate, setStartDate]             = useState("")
   const [endDate, setEndDate]                 = useState("")
   const [toastMsg, setToastMsg]               = useState("")
+  
+  // 印刷用メモの状態
+  const [printMemos, setPrintMemos]           = useState([])
 
   // 担当者履歴をlocalStorageで永続化
   const [assigneeHistory, setAssigneeHistory] = useState(() => {
@@ -852,7 +965,8 @@ export default function App() {
         {[
           { id: "today",    label: "📅 今日" },
           { id: "tomorrow", label: "📆 明日" },
-          { id: "schedule", label: "📋 工程表" }
+          { id: "schedule", label: "📋 工程表" },
+          { id: "print",    label: "🖨️ 印刷" }
         ].map(tab => (
           <button key={tab.id} className={`kh-tab${currentTab === tab.id ? " active" : ""}`}
             onClick={() => setCurrentTab(tab.id)}
@@ -895,6 +1009,15 @@ export default function App() {
           setNavOffset={setNavOffset} openModal={openModal}
           setPreviewTask={setPreviewTask} todayKey={todayKey}/>
       )}
+      {currentTab === "print" && (
+        <PrintTab
+          filteredTasks={filteredTasks} viewDays={viewDays} base={base}
+          navLabel={navLabel} colDates={colDates} isMobile={isMobile}
+          toggleDone={toggleDone} deleteTaskById={deleteTaskById}
+          setNavOffset={setNavOffset} openModal={openModal}
+          setPreviewTask={setPreviewTask} todayKey={todayKey}
+          printMemos={printMemos} setPrintMemos={setPrintMemos}/>
+      )}
 
       {currentPreviewTask && (
         <PreviewCard task={currentPreviewTask} onClose={() => setPreviewTask(null)}
@@ -915,11 +1038,6 @@ export default function App() {
 
       {toastMsg && <div className="kh-toast">⚠️ {toastMsg}</div>}
       
-      {currentTab === "schedule" && (
-        <button className="kh-print-btn" onClick={handlePrint} aria-label="印刷" title="工程表を印刷">
-          🖨️
-        </button>
-      )}
     </div>
   )
 }
