@@ -560,6 +560,15 @@ const PrintTab = memo(function PrintTab({
   // タイトルの月を取得
   const titleMonth = colDates[0] ? `${colDates[0].getMonth() + 1}月` : ""
   
+  // デバッグ用
+  console.log("PrintTab レンダリング:", { 
+    filteredTasksCount: filteredTasks.length, 
+    viewDays, 
+    colDatesLength: colDates.length,
+    weeksCount: weeks.length,
+    titleMonth
+  })
+  
   return (
     <div className="kh-print-tab">
       <div className="kh-print-toolbar">
@@ -1090,7 +1099,10 @@ export default function App() {
           { id: "print",    label: "🖨️ 印刷" }
         ].map(tab => (
           <button key={tab.id} className={`kh-tab${currentTab === tab.id ? " active" : ""}`}
-            onClick={() => setCurrentTab(tab.id)}
+            onClick={() => {
+              console.log(`タブ切り替え: ${tab.id}`)
+              setCurrentTab(tab.id)
+            }}
             aria-selected={currentTab === tab.id}
             role="tab">{tab.label}</button>
         ))}
