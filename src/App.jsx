@@ -180,7 +180,32 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-print-execute:hover{background:#ffd700}
 .kh-print-hint{color:#94a3b8;font-size:12px;margin-left:auto}
 .kh-print-canvas{flex:1;position:relative;overflow:auto;background:#fff;padding:20px}
-.kh-print-schedule-wrapper{position:relative;min-height:100%}
+.kh-print-page-header{text-align:center;margin-bottom:16px}
+.kh-print-title{font-size:24px;font-weight:900;color:#192536;margin:0 0 12px}
+.kh-print-legend-bar{display:flex;justify-content:center;gap:20px;flex-wrap:wrap}
+.kh-print-legend-item{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700}
+.kh-print-legend-dot{width:14px;height:14px;border-radius:2px}
+.kh-print-calendar{border:2px solid #000}
+.kh-print-dow-header{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:2px solid #000}
+.kh-print-dow-cell{padding:8px;text-align:center;font-size:14px;font-weight:900;background:#e0e0e0;border-right:1px solid #000}
+.kh-print-dow-cell:last-child{border-right:none}
+.kh-print-dow-cell.sun{color:#c00}
+.kh-print-dow-cell.sat{color:#00c}
+.kh-print-week{border-bottom:1px solid #000}
+.kh-print-week:last-child{border-bottom:none}
+.kh-print-date-row{display:grid;grid-template-columns:repeat(7,1fr)}
+.kh-print-date-cell{padding:8px 6px;border-right:1px solid #000;border-bottom:1px solid #000;min-height:80px;display:flex;flex-direction:column;gap:6px}
+.kh-print-date-cell:last-child{border-right:none}
+.kh-print-date-cell.sun{background:#ffe5e5}
+.kh-print-date-cell.sat{background:#e5e5ff}
+.kh-print-date-cell.today{background:#ffffcc;box-shadow:inset 0 0 0 2px #000}
+.kh-print-date-num{font-size:20px;font-weight:900;color:#333;text-align:center;margin-bottom:4px}
+.kh-print-task-list{display:flex;flex-direction:column;gap:3px;flex:1}
+.kh-print-task-bar{background:#f0f0f0;border-left:4px solid #192536;padding:4px 6px;font-size:11px}
+.kh-print-task-text{display:flex;flex-direction:column;gap:1px}
+.kh-print-task-person{font-weight:700;font-size:10px;color:#333}
+.kh-print-task-name{font-size:11px;color:#555;line-height:1.3}
+.kh-print-task-continue{font-size:10px;color:#999}
 .kh-print-memo{position:absolute;background:#fff9c4;border:2px solid #ffd700;border-radius:6px;padding:8px 12px;cursor:move;box-shadow:0 2px 8px rgba(0,0,0,0.15);color:#000;font-weight:600;min-width:100px;user-select:none;z-index:10}
 .kh-print-memo:hover{box-shadow:0 4px 12px rgba(0,0,0,0.25)}
 .kh-print-memo-delete{position:absolute;top:-10px;right:-10px;width:24px;height:24px;border-radius:50%;background:#D42020;color:#fff;border:none;font-size:14px;cursor:pointer;display:none}
@@ -197,9 +222,20 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
   body{background:#fff;margin:0;padding:0}
   .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn,.kh-day-btns,.kh-print-toolbar{display:none !important}
   .kh-print-tab{height:auto !important;overflow:visible !important;display:block !important}
-  .kh-print-canvas{padding:0 !important;overflow:visible !important;height:auto !important;flex:none !important;position:static !important}
-  .kh-print-schedule-wrapper{position:static !important}
-  .kh-print-memo{background:transparent !important;border:none !important;box-shadow:none !important;padding:4px !important;cursor:default !important}
+  .kh-print-canvas{padding:10mm !important;overflow:visible !important;height:auto !important;flex:none !important;position:static !important}
+  .kh-print-title{font-size:18px}
+  .kh-print-legend-bar{gap:12px}
+  .kh-print-legend-item{font-size:10px}
+  .kh-print-legend-dot{width:10px;height:10px}
+  .kh-print-dow-cell{padding:6px;font-size:11px}
+  .kh-print-date-cell{padding:5px 4px;min-height:50px;gap:4px}
+  .kh-print-date-num{font-size:16px;margin-bottom:3px}
+  .kh-print-task-list{gap:2px}
+  .kh-print-task-bar{font-size:8px;padding:2px 4px}
+  .kh-print-task-person{font-size:7px}
+  .kh-print-task-name{font-size:8px;line-height:1.2}
+  .kh-print-task-continue{font-size:8px}
+  .kh-print-memo{background:transparent !important;border:none !important;box-shadow:none !important;padding:2px !important;cursor:default !important}
   .kh-print-memo-delete,.kh-print-memo-controls{display:none !important}
   .kh-print-header{display:block !important;font-size:13px;font-weight:900;text-align:center;padding:1px 0;border-bottom:2px solid #000;margin-bottom:1px}
   .kh-grid-wrap{padding:0;margin:0;display:flex;flex-direction:column;min-height:0}
@@ -488,12 +524,22 @@ const PrintTab = memo(function PrintTab({
 }) {
   const canvasRef = useRef(null)
   
+  // レイアウトされたタスク
+  const laidOut = useMemo(
+    () => layoutTasks(filteredTasks, viewDays, base),
+    [filteredTasks, viewDays, base]
+  )
+  
+  // 週ごとにグループ化
+  const weeks = []
+  for (let i = 0; i < viewDays; i += 7) weeks.push({ wo: i, days: colDates.slice(i, i + 7) })
+  
   const addMemo = () => {
     setPrintMemos([...printMemos, {
       id: Date.now(),
       text: "メモを入力",
       x: 100,
-      y: 100,
+      y: 150,
       fontSize: 14,
       fontWeight: "normal"
     }])
@@ -511,6 +557,9 @@ const PrintTab = memo(function PrintTab({
     window.print()
   }
   
+  // タイトルの月を取得
+  const titleMonth = colDates[0] ? `${colDates[0].getMonth() + 1}月` : ""
+  
   return (
     <div className="kh-print-tab">
       <div className="kh-print-toolbar">
@@ -521,18 +570,85 @@ const PrintTab = memo(function PrintTab({
           🖨️ 印刷する
         </button>
         <div className="kh-print-hint">
-          メモをドラッグして移動、ダブルクリックで編集できます
+          メモをドラッグして移動、ダブルクリックで編集
         </div>
       </div>
       <div className="kh-print-canvas" ref={canvasRef}>
-        <div className="kh-print-schedule-wrapper">
-          <ScheduleView
-            filteredTasks={filteredTasks} viewDays={viewDays} base={base}
-            navLabel={navLabel} colDates={colDates} isMobile={false}
-            toggleDone={toggleDone} deleteTaskById={deleteTaskById}
-            setNavOffset={setNavOffset} openModal={openModal}
-            setPreviewTask={setPreviewTask} todayKey={todayKey}/>
+        {/* 印刷用ヘッダー */}
+        <div className="kh-print-page-header">
+          <h1 className="kh-print-title">{titleMonth} 工程表</h1>
+          <div className="kh-print-legend-bar">
+            {COLORS.map(c => (
+              <div key={c.id} className="kh-print-legend-item">
+                <div className="kh-print-legend-dot" style={{background: c.bg}}></div>
+                <span className="kh-print-legend-label">{c.label}</span>
+              </div>
+            ))}
+          </div>
         </div>
+        
+        {/* カレンダーグリッド */}
+        <div className="kh-print-calendar">
+          {/* 曜日ヘッダー */}
+          <div className="kh-print-dow-header">
+            {DAYS_JA.map((d, i) => (
+              <div key={i} className={`kh-print-dow-cell${i === 0 ? " sun" : i === 6 ? " sat" : ""}`}>
+                {d}
+              </div>
+            ))}
+          </div>
+          
+          {/* 週ごとの表示 */}
+          {weeks.map(week => (
+            <div key={week.wo} className="kh-print-week">
+              {/* 日付とタスクを統合した行 */}
+              <div className="kh-print-date-row">
+                {week.days.map((d, idx) => {
+                  const dk = toKey(d)
+                  const isToday = dk === todayKey
+                  const dow = d.getDay()
+                  const dayTasks = laidOut.filter(t => {
+                    const s = parseKey(t.start_key), e = parseKey(t.end_key), day = parseKey(dk)
+                    return day >= s && day <= e
+                  })
+                  
+                  return (
+                    <div key={idx} className={`kh-print-date-cell${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}${isToday ? " today" : ""}`}>
+                      <div className="kh-print-date-num">{d.getDate()}</div>
+                      <div className="kh-print-task-list">
+                        {dayTasks.map(t => {
+                          const s = parseKey(t.start_key)
+                          const day = parseKey(dk)
+                          const isFirst = day.getTime() === s.getTime()
+                          const color = COLORS.find(c => c.id === t.color) || COLORS[0]
+                          const [company, person] = splitAssignee(t.assignee)
+                          
+                          return (
+                            <div
+                              key={t.id}
+                              className="kh-print-task-bar"
+                              style={{
+                                background: color.bg,
+                                borderLeft: `4px solid ${color.darker}`
+                              }}>
+                              <div className="kh-print-task-text">
+                                {isFirst && person && <div className="kh-print-task-person">{person}</div>}
+                                {isFirst && <div className="kh-print-task-name">{t.text}</div>}
+                                {!isFirst && <div className="kh-print-task-continue">→</div>}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        {/* メモ */}
         {printMemos.map(memo => (
           <div
             key={memo.id}
