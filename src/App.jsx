@@ -3,13 +3,13 @@ import { supabase } from "./supabaseClient"
 
 const DAYS_JA = ["日","月","火","水","木","金","土"]
 const COLORS = [
-  { id:"orange", label:"構造",   bg:"#E8521A" },
-  { id:"blue",   label:"設備",   bg:"#1A6FE8" },
-  { id:"green",  label:"内装",   bg:"#1A9E5C" },
-  { id:"red",    label:"検査",   bg:"#D42020" },
-  { id:"yellow", label:"定例",   bg:"#C49800" },
-  { id:"purple", label:"搬入",   bg:"#7C3AED" },
-  { id:"gray",   label:"その他", bg:"#52606D" },
+  { id:"orange", label:"構造",   bg:"#E8521A", darker:"#C13D0F" },
+  { id:"blue",   label:"設備",   bg:"#1A6FE8", darker:"#0F4FB0" },
+  { id:"green",  label:"内装",   bg:"#1A9E5C", darker:"#0F7242" },
+  { id:"red",    label:"検査",   bg:"#D42020", darker:"#A01010" },
+  { id:"yellow", label:"定例",   bg:"#C49800", darker:"#936F00" },
+  { id:"purple", label:"搬入",   bg:"#7C3AED", darker:"#5B21B6" },
+  { id:"gray",   label:"その他", bg:"#52606D", darker:"#374151" },
 ]
 
 const toKey    = d    => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`
