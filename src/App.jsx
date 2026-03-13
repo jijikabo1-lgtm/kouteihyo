@@ -175,34 +175,34 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 @media print {
   @page {
     size: A4 landscape;
-    margin: 8mm 10mm;
+    margin: 5mm 8mm;
   }
   body{background:#fff;margin:0;padding:0}
-  .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn{display:none !important}
-  .kh-print-header{display:block !important;font-size:14px;font-weight:900;text-align:center;padding:4px 0 3px;border-bottom:2px solid #000;margin-bottom:6px}
-  .kh-grid-wrap{padding:0;margin:0}
-  .kh-week-block{page-break-inside:avoid;page-break-after:avoid;margin-bottom:6px}
+  .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn,.kh-day-btns{display:none !important}
+  .kh-print-header{display:block !important;font-size:16px;font-weight:900;text-align:center;padding:2px 0;border-bottom:2px solid #000;margin-bottom:3px}
+  .kh-grid-wrap{padding:0;margin:0;display:flex;flex-direction:column;height:100vh}
+  .kh-week-block{page-break-inside:avoid;page-break-after:avoid;margin-bottom:2px;flex:1;display:flex;flex-direction:column}
   .kh-week-block:last-child{margin-bottom:0}
-  .kh-day-header{display:grid;gap:0.5px;margin-bottom:1px;grid-template-columns:repeat(7,1fr)}
-  .kh-day-cell{background:#fff;border:1px solid #000;border-radius:0;padding:2px 3px;min-height:18px;cursor:default}
+  .kh-day-header{display:grid;gap:0.5px;margin-bottom:1px;grid-template-columns:repeat(7,1fr);flex-shrink:0}
+  .kh-day-cell{background:#fff;border:1px solid #000;border-radius:0;padding:1px 2px;min-height:auto;cursor:default}
   .kh-day-cell:hover{opacity:1}
   .kh-day-cell.today{background:#ffffcc;border:2px solid #000}
   .kh-day-cell.sun{background:#ffe5e5;border-color:#000}
   .kh-day-cell.sat{background:#e5e5ff;border-color:#000}
-  .kh-day-left{gap:1px}
-  .kh-dmonth{font-size:7px;font-weight:700;color:#000}
-  .kh-dnum{font-size:9px;font-weight:900;color:#000}
-  .kh-dow{font-size:6px;font-weight:700;color:#000}
+  .kh-day-left{gap:1px;display:flex;flex-direction:column}
+  .kh-dmonth{font-size:9px;font-weight:700;color:#000}
+  .kh-dnum{font-size:12px;font-weight:900;color:#000}
+  .kh-dow{font-size:8px;font-weight:700;color:#000}
   .kh-plus{display:none}
-  .kh-task-area{display:block !important;position:relative;background:#fff;border:1px solid #000;border-top:none;min-height:50px;max-height:70px;overflow:hidden}
+  .kh-task-area{display:block !important;position:relative;background:#fff;border:1px solid #000;border-top:none;flex:1;min-height:0;overflow:visible}
   .kh-col-grid{display:none}
-  .kh-task-bar{box-shadow:none;border:1px solid #000;font-size:7px;font-weight:900;padding-left:2px !important;padding-right:2px !important;color:#000 !important}
-  .kh-task-bar .kh-bar-text{font-size:7px;line-height:1.1;font-weight:900;color:#000 !important}
+  .kh-task-bar{box-shadow:none;border:1px solid #000;font-size:9px;font-weight:900;padding-left:3px !important;padding-right:3px !important;color:#000 !important}
+  .kh-task-bar .kh-bar-text{font-size:9px;line-height:1.2;font-weight:900;color:#000 !important}
   .kh-task-bar .kh-bar-text span{color:#000 !important;opacity:1 !important}
   .kh-done-check{display:none}
-  .kh-legend{display:flex !important;padding:3px 0 0;gap:6px;justify-content:center;page-break-before:avoid;page-break-inside:avoid}
-  .kh-legend-item{font-size:7px;font-weight:700;color:#000}
-  .kh-legend-dot{width:8px;height:8px;border:1px solid #000}
+  .kh-legend{display:flex !important;padding:2px 0 0;gap:6px;justify-content:center;page-break-before:avoid;page-break-inside:avoid;flex-shrink:0}
+  .kh-legend-item{font-size:9px;font-weight:700;color:#000}
+  .kh-legend-dot{width:10px;height:10px;border:1px solid #000}
 }
 `
 
