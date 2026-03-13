@@ -566,7 +566,10 @@ const PrintTab = memo(function PrintTab({
     viewDays, 
     colDatesLength: colDates.length,
     weeksCount: weeks.length,
-    titleMonth
+    titleMonth,
+    COLORS_type: typeof COLORS,
+    COLORS_isArray: Array.isArray(COLORS),
+    COLORS_length: COLORS?.length
   })
   
   return (
@@ -587,12 +590,12 @@ const PrintTab = memo(function PrintTab({
         <div className="kh-print-page-header">
           <h1 className="kh-print-title">{titleMonth} 工程表</h1>
           <div className="kh-print-legend-bar">
-            {COLORS.map(c => (
+            {Array.isArray(COLORS) ? COLORS.map(c => (
               <div key={c.id} className="kh-print-legend-item">
                 <div className="kh-print-legend-dot" style={{background: c.bg}}></div>
                 <span className="kh-print-legend-label">{c.label}</span>
               </div>
-            ))}
+            )) : <span>COLORSが配列ではありません</span>}
           </div>
         </div>
         
