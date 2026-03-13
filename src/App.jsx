@@ -169,6 +169,26 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-preview-done-btn{padding:15px 18px;border:2px solid #E2E8F0;background:#fff;color:#64748B;border-radius:14px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px}
 .kh-preview-done-btn.is-done{background:#DCFCE7;border-color:#86EFAC;color:#16A34A}
 .kh-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#D42020;color:#fff;padding:10px 20px;border-radius:12px;font-size:13px;font-weight:700;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.3);animation:kh-fadein 0.2s ease}
+.kh-print-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#192536;color:#F5C200;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:400;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
+.kh-print-btn:hover{transform:scale(1.1)}
+.kh-print-task-list{display:none}
+@media print {
+  body{background:#fff}
+  .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-legend,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn{display:none !important}
+  .kh-grid-wrap{padding:16px 0}
+  .kh-week-block{page-break-inside:avoid;margin-bottom:16px}
+  .kh-day-header{display:grid;gap:1px;margin-bottom:8px}
+  .kh-day-cell{background:#fff;border:1px solid #333;border-radius:0;padding:4px 6px;min-height:auto}
+  .kh-day-cell.today{background:#ffffcc;border:2px solid #000}
+  .kh-task-area{display:none}
+  .kh-print-task-list{display:block !important}
+  .kh-print-header{font-size:18px;font-weight:900;padding:12px 16px;background:#f5f5f5;border-bottom:3px solid #192536;margin-bottom:16px}
+  .kh-print-week-title{font-size:14px;font-weight:800;padding:8px 12px;background:#e8e8e8;border-left:4px solid #192536;margin:16px 0 8px}
+  .kh-print-task{padding:8px 12px;border-left:4px solid;margin-bottom:6px;page-break-inside:avoid;background:#fafafa}
+  .kh-print-task-title{font-size:13px;font-weight:800;color:#000;margin-bottom:4px}
+  .kh-print-task-meta{font-size:11px;color:#555;display:flex;gap:12px;flex-wrap:wrap}
+  .kh-print-task-meta span{white-space:nowrap}
+}
 `
 
 // ────────────────────────────────────────────────
@@ -347,6 +367,44 @@ const ScheduleView = memo(function ScheduleView({
             <div className="kh-legend-dot" style={{background:c.bg}}/>{c.label}
           </div>
         ))}
+      </div>
+      
+      {/* 印刷用タスクリスト */}
+      <div className="kh-print-task-list">
+        <div className="kh-print-header">工程表 - {navLabel}</div>
+        {weeks.map(({ wo, days: week }) => {
+          const weekStart = week[0]
+          const weekEnd = week[week.length - 1]
+          const weekTasks = laidOut.filter(t => t.endCol >= wo && t.col < wo + week.length)
+          if (weekTasks.length === 0) return null
+          return (
+            <div key={wo}>
+              <div className="kh-print-week-title">
+                {weekStart.getMonth() + 1}月{weekStart.getDate()}日 〜 {weekEnd.getMonth() + 1}月{weekEnd.getDate()}日
+              </div>
+              {weekTasks.map(t => {
+                const c = COLORS.find(x => x.id === t.color) || COLORS[0]
+                const s = parseKey(t.start_key)
+                const e = parseKey(t.end_key)
+                const days = diffDays(s, e) + 1
+                return (
+                  <div key={t.id} className="kh-print-task" style={{borderLeftColor: c.bg}}>
+                    <div className="kh-print-task-title">
+                      {t.done && "✓ "}
+                      {t.text}
+                    </div>
+                    <div className="kh-print-task-meta">
+                      <span>【{c.label}】</span>
+                      {t.assignee && <span>担当: {t.assignee}</span>}
+                      <span>期間: {s.getMonth()+1}/{s.getDate()} 〜 {e.getMonth()+1}/{e.getDate()} ({days}日間)</span>
+                      {t.done && <span style={{color: "#16A34A", fontWeight: 800}}>✅完了</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
       </div>
     </>
   )
@@ -595,6 +653,11 @@ export default function App() {
   const showToast = useCallback((msg) => {
     setToastMsg(msg)
     setTimeout(() => setToastMsg(""), 3000)
+  }, [])
+
+  // 印刷ハンドラー
+  const handlePrint = useCallback(() => {
+    window.print()
   }, [])
 
   const loadTasks = useCallback(async () => {
@@ -873,6 +936,12 @@ export default function App() {
       )}
 
       {toastMsg && <div className="kh-toast">⚠️ {toastMsg}</div>}
+      
+      {currentTab === "schedule" && (
+        <button className="kh-print-btn" onClick={handlePrint} aria-label="印刷" title="工程表を印刷">
+          🖨️
+        </button>
+      )}
     </div>
   )
 }
