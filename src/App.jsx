@@ -172,7 +172,7 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-print-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#192536;color:#F5C200;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:400;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
 .kh-print-btn:hover{transform:scale(1.1)}
 .kh-print-header{display:none}
-.kh-print-tab{width:100%;height:calc(100vh - 140px);display:flex;flex-direction:column;background:#f8f9fa}
+.kh-print-tab{width:100%;height:calc(100vh - 140px);display:flex;flex-direction:column;background:#f8f9fa;overflow:hidden}
 .kh-print-toolbar{background:#192536;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #F5C200;flex-shrink:0}
 .kh-print-tool-btn{padding:10px 20px;background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s}
 .kh-print-tool-btn:hover{background:rgba(255,255,255,0.2);transform:translateY(-1px)}
@@ -180,7 +180,8 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-print-execute:hover{background:#ffd700}
 .kh-print-hint{color:#94a3b8;font-size:12px;margin-left:auto}
 .kh-print-canvas{flex:1;position:relative;overflow:auto;background:#fff;padding:20px}
-.kh-print-memo{position:absolute;background:#fff9c4;border:2px solid #ffd700;border-radius:6px;padding:8px 12px;cursor:move;box-shadow:0 2px 8px rgba(0,0,0,0.15);color:#000;font-weight:600;min-width:100px;user-select:none}
+.kh-print-schedule-wrapper{position:relative;min-height:100%}
+.kh-print-memo{position:absolute;background:#fff9c4;border:2px solid #ffd700;border-radius:6px;padding:8px 12px;cursor:move;box-shadow:0 2px 8px rgba(0,0,0,0.15);color:#000;font-weight:600;min-width:100px;user-select:none;z-index:10}
 .kh-print-memo:hover{box-shadow:0 4px 12px rgba(0,0,0,0.25)}
 .kh-print-memo-delete{position:absolute;top:-10px;right:-10px;width:24px;height:24px;border-radius:50%;background:#D42020;color:#fff;border:none;font-size:14px;cursor:pointer;display:none}
 .kh-print-memo:hover .kh-print-memo-delete{display:flex;align-items:center;justify-content:center}
@@ -195,7 +196,9 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
   }
   body{background:#fff;margin:0;padding:0}
   .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn,.kh-day-btns,.kh-print-toolbar{display:none !important}
-  .kh-print-canvas{padding:0 !important;overflow:visible !important}
+  .kh-print-tab{height:auto !important;overflow:visible !important;display:block !important}
+  .kh-print-canvas{padding:0 !important;overflow:visible !important;height:auto !important;flex:none !important;position:static !important}
+  .kh-print-schedule-wrapper{position:static !important}
   .kh-print-memo{background:transparent !important;border:none !important;box-shadow:none !important;padding:4px !important;cursor:default !important}
   .kh-print-memo-delete,.kh-print-memo-controls{display:none !important}
   .kh-print-header{display:block !important;font-size:13px;font-weight:900;text-align:center;padding:1px 0;border-bottom:2px solid #000;margin-bottom:1px}
@@ -522,12 +525,14 @@ const PrintTab = memo(function PrintTab({
         </div>
       </div>
       <div className="kh-print-canvas" ref={canvasRef}>
-        <ScheduleView
-          filteredTasks={filteredTasks} viewDays={viewDays} base={base}
-          navLabel={navLabel} colDates={colDates} isMobile={false}
-          toggleDone={toggleDone} deleteTaskById={deleteTaskById}
-          setNavOffset={setNavOffset} openModal={openModal}
-          setPreviewTask={setPreviewTask} todayKey={todayKey}/>
+        <div className="kh-print-schedule-wrapper">
+          <ScheduleView
+            filteredTasks={filteredTasks} viewDays={viewDays} base={base}
+            navLabel={navLabel} colDates={colDates} isMobile={false}
+            toggleDone={toggleDone} deleteTaskById={deleteTaskById}
+            setNavOffset={setNavOffset} openModal={openModal}
+            setPreviewTask={setPreviewTask} todayKey={todayKey}/>
+        </div>
         {printMemos.map(memo => (
           <div
             key={memo.id}
