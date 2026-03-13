@@ -524,7 +524,8 @@ const PrintTab = memo(function PrintTab({
 }) {
   const canvasRef = useRef(null)
   
-  // 色定義をコンポーネント内で明示的に定義
+  // 定数をコンポーネント内で明示的に定義（ビルド時の変数名変換問題を回避）
+  const daysJa = ["日","月","火","水","木","金","土"]
   const colorList = [
     { id:"orange", label:"構造",   bg:"#E8521A", darker:"#C13D0F" },
     { id:"blue",   label:"設備",   bg:"#1A6FE8", darker:"#0F4FB0" },
@@ -614,7 +615,7 @@ const PrintTab = memo(function PrintTab({
         <div className="kh-print-calendar">
           {/* 曜日ヘッダー */}
           <div className="kh-print-dow-header">
-            {DAYS_JA.map((d, i) => (
+            {daysJa.map((d, i) => (
               <div key={i} className={`kh-print-dow-cell${i === 0 ? " sun" : i === 6 ? " sat" : ""}`}>
                 {d}
               </div>
