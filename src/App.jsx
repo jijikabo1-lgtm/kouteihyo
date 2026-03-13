@@ -524,6 +524,17 @@ const PrintTab = memo(function PrintTab({
 }) {
   const canvasRef = useRef(null)
   
+  // 色定義をコンポーネント内で明示的に定義
+  const colorList = [
+    { id:"orange", label:"構造",   bg:"#E8521A", darker:"#C13D0F" },
+    { id:"blue",   label:"設備",   bg:"#1A6FE8", darker:"#0F4FB0" },
+    { id:"green",  label:"内装",   bg:"#1A9E5C", darker:"#0F7242" },
+    { id:"red",    label:"検査",   bg:"#D42020", darker:"#A01010" },
+    { id:"yellow", label:"定例",   bg:"#C49800", darker:"#936F00" },
+    { id:"purple", label:"搬入",   bg:"#7C3AED", darker:"#5B21B6" },
+    { id:"gray",   label:"その他", bg:"#52606D", darker:"#374151" },
+  ]
+  
   // レイアウトされたタスク
   const laidOut = useMemo(
     () => layoutTasks(filteredTasks, viewDays, base),
@@ -590,12 +601,12 @@ const PrintTab = memo(function PrintTab({
         <div className="kh-print-page-header">
           <h1 className="kh-print-title">{titleMonth} 工程表</h1>
           <div className="kh-print-legend-bar">
-            {Array.isArray(COLORS) ? COLORS.map(c => (
+            {colorList.map(c => (
               <div key={c.id} className="kh-print-legend-item">
                 <div className="kh-print-legend-dot" style={{background: c.bg}}></div>
                 <span className="kh-print-legend-label">{c.label}</span>
               </div>
-            )) : <span>COLORSが配列ではありません</span>}
+            ))}
           </div>
         </div>
         
@@ -632,7 +643,7 @@ const PrintTab = memo(function PrintTab({
                           const s = parseKey(t.start_key)
                           const day = parseKey(dk)
                           const isFirst = day.getTime() === s.getTime()
-                          const color = COLORS.find(c => c.id === t.color) || COLORS[0]
+                          const color = colorList.find(c => c.id === t.color) || colorList[0]
                           const [company, person] = splitAssignee(t.assignee)
                           
                           return (
