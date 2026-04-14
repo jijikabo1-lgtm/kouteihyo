@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo } from "react"
 import { supabase } from "./supabaseClient"
+import html2canvas from "html2canvas"
 
 const DAYS_JA = ["日","月","火","水","木","金","土"]
 const COLORS = [
@@ -53,11 +54,14 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-hmonth{color:#fff;font-size:15px;font-weight:900}
 .kh-hmode{color:#22A86E;font-size:10px;font-weight:700;margin-top:1px}
 .kh-day-btns{display:flex;gap:4px}
-.kh-day-btn{padding:4px 9px;border-radius:6px;border:none;cursor:pointer;font-weight:800;font-size:11px}
+.kh-day-btn{padding:4px 9px;border-radius:6px;border:none;cursor:pointer;font-weight:800;font-size:11px;min-height:32px;touch-action:manipulation}
+@media (max-width: 768px) {
+  .kh-day-btn{min-height:38px;padding:5px 10px}
+}
 .kh-tabs{display:flex;background:#192536;border-bottom:2px solid #0f1a27}
 .kh-tab{flex:1;padding:9px 0;text-align:center;font-size:13px;font-weight:700;color:rgba(255,255,255,0.5);cursor:pointer;border:none;background:transparent;border-bottom:3px solid transparent;transition:all 0.15s}
 .kh-tab.active{color:#F5C200;border-bottom-color:#F5C200}
-.kh-filter-bar{background:#fff;padding:8px 12px;display:flex;gap:8px;align-items:center;border-bottom:1px solid #E0DBD3;flex-wrap:wrap}
+.kh-filter-bar{background:#fff;padding:8px 12px;display:flex;gap:8px;align-items:center;border-bottom:1px solid #E0DBD3;flex-wrap:wrap;-webkit-overflow-scrolling:touch}
 .kh-filter-bar input{flex:1;min-width:100px;padding:6px 10px;border-radius:20px;border:1.5px solid #D5D0C8;font-size:13px;outline:none;background:#FAFAF8}
 .kh-filter-bar input:focus{border-color:#192536}
 .kh-filter-chips{display:flex;gap:4px;flex-wrap:wrap}
@@ -66,6 +70,9 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-filter-clear{padding:4px 10px;border-radius:20px;border:1.5px solid #D5D0C8;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#888;white-space:nowrap}
 .kh-nav{display:flex;align-items:center;justify-content:space-between;padding:8px 14px 4px}
 .kh-nav-btn{background:#192536;color:#fff;border:none;border-radius:8px;padding:7px 14px;font-weight:700;font-size:13px;cursor:pointer}
+@media (max-width: 768px) {
+  .kh-nav-btn{min-height:44px;min-width:44px}
+}
 .kh-nav-label{font-size:12px;color:#555;font-weight:700}
 .kh-zoom-hint{text-align:center;font-size:11px;color:#888;padding:2px 0 4px}
 .kh-grid-wrap{padding:0 8px 16px}
@@ -93,12 +100,25 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-task-area{position:relative;background:rgba(255,255,255,0.5);border-radius:6px;border:1px solid #D5D0C8;overflow:hidden}
 .kh-col-grid{position:absolute;inset:0;display:grid;pointer-events:none}
 .kh-col-div{border-right:1px dashed #E0DBD3}
-.kh-task-bar{position:absolute;display:flex;align-items:center;cursor:pointer;overflow:hidden;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.2);font-size:9px;font-weight:700;color:#fff;transition:opacity 0.15s}
+.kh-task-bar{position:absolute;display:flex;align-items:center;cursor:pointer;overflow:hidden;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.2);font-size:9px;font-weight:700;color:#fff;transition:opacity 0.15s;touch-action:manipulation}
 .kh-task-bar:hover{opacity:0.88}
+.kh-task-bar.resizing{opacity:0.9;box-shadow:0 2px 12px rgba(0,0,0,0.35)}
 .kh-task-bar.done{opacity:0.4}
+.kh-resize-handle{position:absolute;top:0;bottom:0;width:9px;z-index:20;cursor:col-resize;background:transparent;display:flex;align-items:center;justify-content:center;touch-action:none}
+.kh-resize-handle::after{content:"";display:block;width:2px;height:60%;background:rgba(255,255,255,0.5);border-radius:2px}
+.kh-resize-handle:hover::after{background:rgba(255,255,255,0.9)}
+.kh-resize-handle-left{left:0;border-radius:4px 0 0 4px}
+.kh-resize-handle-right{right:0;border-radius:0 4px 4px 0}
+@media (max-width: 768px) {
+  .kh-resize-handle{width:20px}
+  .kh-resize-handle::after{width:3px;height:55%}
+}
 .kh-task-bar.done .kh-bar-text{text-decoration:line-through}
-.kh-done-check{flex-shrink:0;width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,0.8);background:transparent;margin-left:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff;transition:background 0.15s}
+.kh-done-check{flex-shrink:0;width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,0.8);background:transparent;margin-left:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff;transition:background 0.15s;touch-action:manipulation}
 .kh-done-check.checked{background:rgba(255,255,255,0.9);color:#1A9E5C}
+@media (max-width: 768px) {
+  .kh-done-check{width:20px;height:20px;font-size:10px}
+}
 .kh-legend{padding:4px 12px 16px;display:flex;flex-wrap:wrap;gap:6px}
 .kh-legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:#555;font-weight:600}
 .kh-legend-dot{width:12px;height:12px;border-radius:3px;flex-shrink:0}
@@ -125,10 +145,19 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-field-label{font-size:11px;font-weight:700;color:#888;margin-bottom:5px}
 .kh-task-input{width:100%;padding:12px 14px;border-radius:10px;border:2px solid #E0DBD3;font-size:14px;outline:none;margin-bottom:14px;font-family:inherit}
 .kh-task-input:focus{border-color:#192536}
+@media (max-width: 768px) {
+  .kh-task-input{font-size:16px}
+  .kh-memo-input{font-size:16px}
+  .kh-filter-bar input{font-size:16px}
+}
 .kh-assignee-wrap{margin-bottom:14px}
 .kh-assignee-row{display:flex;gap:8px;margin-bottom:6px}
 .kh-assignee-input{flex:1;padding:10px 12px;border-radius:10px;border:2px solid #E0DBD3;font-size:13px;outline:none;font-family:inherit;background:#FAFAF8;min-width:0}
 .kh-assignee-input:focus{border-color:#192536}
+@media (max-width: 768px) {
+  .kh-assignee-row{flex-direction:column;gap:6px}
+  .kh-assignee-input{font-size:16px}
+}
 .kh-history-label{font-size:10px;font-weight:700;color:#AAA;margin:8px 0 5px;letter-spacing:0.5px}
 .kh-assignee-history{display:flex;gap:6px;flex-wrap:wrap}
 .kh-history-item{display:inline-flex;align-items:center;border-radius:20px;border:1.5px solid #D5D0C8;background:#FAFAF8;overflow:hidden;font-size:11px;font-weight:600}
@@ -139,9 +168,20 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-date-row{display:flex;gap:10px;margin-bottom:14px;align-items:flex-end}
 .kh-date-col{flex:1}
 .kh-date-input{width:100%;padding:10px 12px;border-radius:10px;border:2px solid #E0DBD3;font-size:13px;outline:none;font-family:inherit;background:#FAFAF8}
+@media (max-width: 768px) {
+  .kh-date-row{flex-direction:column;gap:6px;align-items:stretch}
+  .kh-date-col{flex:none}
+  .kh-date-input{font-size:16px;padding:12px 14px}
+  .kh-date-arrow{display:none}
+}
 .kh-color-btns{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
 .kh-color-btn{border:none;border-radius:8px;padding:7px 12px;font-weight:800;font-size:12px;cursor:pointer;color:#fff;transition:transform 0.12s}
 .kh-save-btn{width:100%;background:#192536;color:#fff;border:none;border-radius:12px;padding:14px;font-weight:900;font-size:15px;cursor:pointer}
+.kh-memo-input{width:100%;padding:10px 12px;border-radius:10px;border:2px solid #E0DBD3;font-size:13px;outline:none;font-family:inherit;background:#FAFAF8;resize:vertical;min-height:68px;margin-bottom:14px;line-height:1.5}
+.kh-memo-input:focus{border-color:#192536}
+.kh-bar-memo{flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:9px;font-weight:600;color:#333;padding:1px 6px;background:rgba(255,255,255,0.88);pointer-events:none;line-height:14px}
+.kh-card-memo{margin-top:5px;padding:6px 9px;background:#FAFAF8;border-left:3px solid #D5D0C8;border-radius:0 4px 4px 0;font-size:12px;color:#555;line-height:1.55;white-space:pre-wrap;word-break:break-all}
+.kh-pt-bar-memo{font-size:8px;color:#333;line-height:1.4;padding:2px 4px;background:rgba(255,255,255,0.85);border-radius:0 0 3px 3px;overflow:hidden;white-space:pre-wrap;word-break:break-all}
 .kh-preview-bg{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:flex-end;justify-content:center;z-index:490;animation:kh-fadein 0.15s ease}
 @keyframes kh-fadein{from{opacity:0}to{opacity:1}}
 .kh-preview-card{background:#fff;border-radius:24px 24px 0 0;width:100%;max-width:520px;padding:0 0 40px;box-shadow:0 -8px 40px rgba(0,0,0,0.25);animation:kh-slideup 0.2s cubic-bezier(0.34,1.2,0.64,1)}
@@ -171,96 +211,120 @@ body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-s
 .kh-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#D42020;color:#fff;padding:10px 20px;border-radius:12px;font-size:13px;font-weight:700;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.3);animation:kh-fadein 0.2s ease}
 .kh-print-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#192536;color:#F5C200;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:400;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
 .kh-print-btn:hover{transform:scale(1.1)}
-.kh-print-header{display:none}
-.kh-print-tab{width:100%;height:calc(100vh - 140px);display:flex;flex-direction:column;background:#f8f9fa;overflow:hidden}
-.kh-print-toolbar{background:#192536;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #F5C200;flex-shrink:0}
-.kh-print-tool-btn{padding:10px 20px;background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s}
-.kh-print-tool-btn:hover{background:rgba(255,255,255,0.2);transform:translateY(-1px)}
-.kh-print-execute{background:#F5C200;color:#192536;border-color:#F5C200}
+.kh-print-tab{width:100%;height:calc(100vh - 140px);display:flex;flex-direction:column;background:#e0e0e0;overflow:hidden}
+.kh-print-toolbar{background:#192536;padding:10px 20px;display:flex;align-items:center;gap:10px;flex-shrink:0;border-bottom:2px solid #F5C200;flex-wrap:wrap}
+.kh-print-tool-btn{padding:8px 18px;background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;transition:all 0.15s;white-space:nowrap}
+.kh-print-tool-btn:hover{background:rgba(255,255,255,0.2)}
+.kh-print-execute{background:#F5C200;color:#192536;border-color:#F5C200;font-weight:900}
 .kh-print-execute:hover{background:#ffd700}
-.kh-print-hint{color:#94a3b8;font-size:12px;margin-left:auto}
-.kh-print-canvas{flex:1;position:relative;overflow:auto;background:#fff;padding:20px}
-.kh-print-page-header{text-align:center;margin-bottom:16px}
-.kh-print-title{font-size:24px;font-weight:900;color:#192536;margin:0 0 12px}
-.kh-print-legend-bar{display:flex;justify-content:center;gap:20px;flex-wrap:wrap}
-.kh-print-legend-item{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700}
-.kh-print-legend-dot{width:14px;height:14px;border-radius:2px}
-.kh-print-calendar{border:2px solid #000}
-.kh-print-dow-header{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:2px solid #000}
-.kh-print-dow-cell{padding:8px;text-align:center;font-size:14px;font-weight:900;background:#e0e0e0;border-right:1px solid #000}
-.kh-print-dow-cell:last-child{border-right:none}
-.kh-print-dow-cell.sun{color:#c00}
-.kh-print-dow-cell.sat{color:#00c}
-.kh-print-week{border-bottom:1px solid #000}
-.kh-print-week:last-child{border-bottom:none}
-.kh-print-date-row{display:grid;grid-template-columns:repeat(7,1fr)}
-.kh-print-date-cell{padding:8px 6px;border-right:1px solid #000;border-bottom:1px solid #000;min-height:80px;display:flex;flex-direction:column;gap:6px}
-.kh-print-date-cell:last-child{border-right:none}
-.kh-print-date-cell.sun{background:#ffe5e5}
-.kh-print-date-cell.sat{background:#e5e5ff}
-.kh-print-date-cell.today{background:#ffffcc;box-shadow:inset 0 0 0 2px #000}
-.kh-print-date-num{font-size:20px;font-weight:900;color:#333;text-align:center;margin-bottom:4px}
-.kh-print-task-list{display:flex;flex-direction:column;gap:3px;flex:1}
-.kh-print-task-bar{background:#f0f0f0;border-left:4px solid #192536;padding:4px 6px;font-size:11px}
-.kh-print-task-text{display:flex;flex-direction:column;gap:1px}
-.kh-print-task-person{font-weight:700;font-size:10px;color:#333}
-.kh-print-task-name{font-size:11px;color:#555;line-height:1.3}
-.kh-print-task-continue{font-size:10px;color:#999}
-.kh-print-memo{position:absolute;background:#fff9c4;border:2px solid #ffd700;border-radius:6px;padding:8px 12px;cursor:move;box-shadow:0 2px 8px rgba(0,0,0,0.15);color:#000;font-weight:600;min-width:100px;user-select:none;z-index:10}
-.kh-print-memo:hover{box-shadow:0 4px 12px rgba(0,0,0,0.25)}
-.kh-print-memo-delete{position:absolute;top:-10px;right:-10px;width:24px;height:24px;border-radius:50%;background:#D42020;color:#fff;border:none;font-size:14px;cursor:pointer;display:none}
-.kh-print-memo:hover .kh-print-memo-delete{display:flex;align-items:center;justify-content:center}
-.kh-print-memo-controls{display:none;position:absolute;bottom:-36px;left:0;background:#192536;border-radius:6px;padding:4px;gap:4px}
-.kh-print-memo:hover .kh-print-memo-controls{display:flex}
-.kh-print-memo-controls button{background:#fff;border:none;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;border-radius:4px}
-.kh-print-memo-controls button:hover{background:#F5C200}
+.kh-print-hint{color:#64748b;font-size:11px;margin-left:auto}
+@media (max-width: 768px) {
+  .kh-print-toolbar{padding:6px 8px;gap:4px}
+  .kh-print-tool-btn{padding:7px 10px;font-size:12px}
+  .kh-print-hint{display:none}
+}
+.kh-pt-canvas{flex:1;overflow:auto;background:#d0d0d0;display:flex;justify-content:center;align-items:flex-start;padding:20px 16px}
+.kh-pt-paper{background:#fff;width:100%;max-width:calc((100vh - 200px) * 297 / 210);aspect-ratio:297/210;padding:14px 16px;box-shadow:0 6px 28px rgba(0,0,0,0.22);flex-shrink:0;position:relative;display:flex;flex-direction:column}
+.kh-pt-header{flex-shrink:0;margin-bottom:4px}
+.kh-pt-title{font-size:22px;font-weight:900;color:#192536;letter-spacing:3px;text-align:center;margin-bottom:3px}
+.kh-pt-subtitle{width:100%;padding:3px 8px;border:1px dashed #ccc;border-radius:4px;font-size:11px;color:#333;outline:none;background:transparent;font-family:inherit;margin-bottom:4px;display:block;resize:none;overflow:hidden;line-height:1.6;min-height:22px;word-break:break-all;white-space:pre-wrap}
+.kh-pt-subtitle:focus{border-color:#192536;background:#fffef8}
+.kh-pt-subtitle::placeholder{color:#ccc}
+.kh-pt-legend{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-bottom:5px}
+.kh-pt-legend-item{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:#333}
+.kh-pt-legend-dot{width:13px;height:13px;border-radius:2px;flex-shrink:0}
+.kh-pt-calendar{border:2px solid #222;width:100%;display:flex;flex-direction:column;flex:1;min-height:0}
+.kh-pt-dow-row{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:2px solid #222;flex-shrink:0}
+.kh-pt-dow-cell{padding:4px 2px;text-align:center;font-size:12px;font-weight:900;background:#192536;color:#F5C200;border-right:1px solid #444}
+.kh-pt-dow-cell:last-child{border-right:none}
+.kh-pt-dow-cell.sun{color:#ff9999}
+.kh-pt-dow-cell.sat{color:#aaccff}
+.kh-pt-week{border-bottom:1px solid #aaa;flex:1;display:flex;flex-direction:column;min-height:0}
+.kh-pt-week:last-child{border-bottom:none}
+.kh-pt-date-row{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #ddd;flex-shrink:0}
+.kh-pt-date-cell{padding:3px 5px;border-right:1px solid #ddd;background:#fff}
+.kh-pt-date-cell:last-child{border-right:none}
+.kh-pt-date-cell.sun{background:#fff2f2}
+.kh-pt-date-cell.sat{background:#f2f4ff}
+.kh-pt-date-cell.today{background:#fffde6;box-shadow:inset 0 0 0 2px #F5C200}
+.kh-pt-date-num{font-size:15px;font-weight:900;color:#1C2B3A;line-height:1.1;display:inline}
+.kh-pt-date-cell.sun .kh-pt-date-num{color:#c00}
+.kh-pt-date-cell.sat .kh-pt-date-num{color:#006}
+.kh-pt-date-cell.today .kh-pt-date-num{color:#b08000}
+.kh-pt-date-month{font-size:9px;font-weight:700;color:#999;margin-left:3px}
+.kh-pt-gantt{position:relative;width:100%;background:#f8f8f8;flex:1;min-height:0}
+.kh-pt-col-line{position:absolute;top:0;bottom:0;width:1px;background:rgba(0,0,0,0.07);pointer-events:none}
+.kh-pt-bar{position:absolute;display:flex;align-items:center;overflow:hidden;font-size:10px;font-weight:700;color:#fff;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.22)}
+.kh-pt-bar.done{opacity:0.38}
+.kh-pt-bar-inner{display:flex;flex-direction:column;padding:1px 5px;overflow:hidden;flex:1;min-width:0}
+.kh-pt-bar-person{font-size:8px;font-weight:900;line-height:1.1;overflow:hidden;text-overflow:ellipsis;opacity:0.92}
+.kh-pt-bar-name{font-size:9px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis}
+.kh-pt-bar-cont{font-size:8px;opacity:0.6;overflow:hidden;text-overflow:ellipsis}
+.kh-pt-bar-arrow{flex-shrink:0;font-size:10px;padding-right:4px;line-height:1}
+.kh-pt-bar-startmark{flex-shrink:0;font-size:10px;padding-left:3px;opacity:0.7;line-height:1}
+.kh-pt-memo{position:absolute;background:#fff9c4;border:2px solid #ffd700;border-radius:6px;padding:0;cursor:move;box-shadow:0 2px 6px rgba(0,0,0,0.15);color:#000;font-weight:600;min-width:100px;user-select:none;z-index:10;font-size:12px;display:flex;flex-direction:column;touch-action:none}
+.kh-pt-memo-toolbar{display:flex;align-items:center;gap:2px;background:#ffd700;padding:2px 4px;border-radius:4px 4px 0 0;flex-shrink:0}
+.kh-pt-memo-toolbar button{background:#fff;border:none;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer;border-radius:3px;line-height:1.4;min-height:28px;min-width:28px}
+.kh-pt-memo-toolbar button:hover{background:#192536;color:#F5C200}
+@media (max-width: 768px) {
+  .kh-pt-memo-toolbar button{padding:4px 10px;font-size:12px;min-height:36px;min-width:36px}
+}
+.kh-pt-memo-del{background:#D42020 !important;color:#fff !important;margin-left:auto}
+.kh-pt-memo-del:hover{background:#a00 !important;color:#fff !important}
+.kh-pt-memo-body{padding:5px 9px;line-height:1.5}
 @media print {
-  @page {
-    size: A4 landscape;
-    margin: 4mm 6mm;
-  }
+  @page{size:A4 landscape;margin:4mm 6mm}
   body{background:#fff;margin:0;padding:0}
   .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn,.kh-day-btns,.kh-print-toolbar{display:none !important}
   .kh-print-tab{height:auto !important;overflow:visible !important;display:block !important}
-  .kh-print-canvas{padding:10mm !important;overflow:visible !important;height:auto !important;flex:none !important;position:static !important}
-  .kh-print-title{font-size:18px}
-  .kh-print-legend-bar{gap:12px}
-  .kh-print-legend-item{font-size:10px}
-  .kh-print-legend-dot{width:10px;height:10px}
-  .kh-print-dow-cell{padding:6px;font-size:11px}
-  .kh-print-date-cell{padding:5px 4px;min-height:50px;gap:4px}
-  .kh-print-date-num{font-size:16px;margin-bottom:3px}
-  .kh-print-task-list{gap:2px}
-  .kh-print-task-bar{font-size:8px;padding:2px 4px}
-  .kh-print-task-person{font-size:7px}
-  .kh-print-task-name{font-size:8px;line-height:1.2}
-  .kh-print-task-continue{font-size:8px}
-  .kh-print-memo{background:transparent !important;border:none !important;box-shadow:none !important;padding:2px !important;cursor:default !important}
-  .kh-print-memo-delete,.kh-print-memo-controls{display:none !important}
-  .kh-print-header{display:block !important;font-size:13px;font-weight:900;text-align:center;padding:1px 0;border-bottom:2px solid #000;margin-bottom:1px}
-  .kh-grid-wrap{padding:0;margin:0;display:flex;flex-direction:column;min-height:0}
-  .kh-week-block{page-break-inside:avoid;margin-bottom:1px;flex:1;display:flex;flex-direction:column;min-height:0}
-  .kh-week-block:last-child{margin-bottom:0}
-  .kh-day-header{display:grid;gap:0.5px;margin-bottom:0.5px;grid-template-columns:repeat(7,1fr);flex-shrink:0}
-  .kh-day-cell{background:#fff;border:1px solid #000;border-radius:0;padding:0.5px 1px;min-height:auto;cursor:default}
-  .kh-day-cell:hover{opacity:1}
-  .kh-day-cell.today{background:#ffffcc;border:2px solid #000}
-  .kh-day-cell.sun{background:#ffe5e5;border-color:#000}
-  .kh-day-cell.sat{background:#e5e5ff;border-color:#000}
-  .kh-day-left{gap:0.5px;display:flex;flex-direction:column}
-  .kh-dmonth{font-size:7px;font-weight:700;color:#000;line-height:1}
-  .kh-dnum{font-size:10px;font-weight:900;color:#000;line-height:1}
-  .kh-dow{font-size:6px;font-weight:700;color:#000;line-height:1}
-  .kh-plus{display:none}
-  .kh-task-area{display:block !important;position:relative;background:#fff;border:1px solid #000;border-top:none;flex:1;min-height:50px;overflow:visible}
-  .kh-col-grid{display:none}
-  .kh-task-bar{box-shadow:none;border:1px solid #000;font-size:7px;font-weight:900;padding:1px 2px !important;color:#000 !important;line-height:1.1;min-height:12px}
-  .kh-task-bar .kh-bar-text{font-size:7px;line-height:1.1;font-weight:900;color:#000 !important}
-  .kh-task-bar .kh-bar-text span{color:#000 !important;opacity:1 !important}
-  .kh-done-check{display:none}
-  .kh-legend{display:flex !important;padding:1px 0 0;gap:4px;justify-content:center;page-break-before:avoid;page-break-inside:avoid;flex-shrink:0}
-  .kh-legend-item{font-size:7px;font-weight:700;color:#000}
-  .kh-legend-dot{width:8px;height:8px;border:1px solid #000}
+  .kh-pt-canvas{display:block !important;overflow:visible !important;padding:0 !important;background:#fff !important}
+  .kh-pt-paper{max-width:none !important;width:100% !important;aspect-ratio:auto !important;height:calc(210mm - 8mm) !important;padding:3mm 4mm !important;box-shadow:none !important}
+  .kh-pt-subtitle{border:none !important;padding:0 !important;background:transparent !important;margin-bottom:2px}
+  .kh-pt-legend{gap:8px;margin-bottom:4px}
+  .kh-pt-gantt{overflow:visible}
+  .kh-pt-bar{box-shadow:none}
+  .kh-pt-memo{background:transparent !important;border:none !important;box-shadow:none !important}
+  .kh-pt-memo-toolbar{display:none !important}
+  .kh-pt-memo-body{padding:0 !important}
+
+  /* 28日（4週）*/
+  .kh-pt-paper[data-weeks="4"] .kh-pt-title{font-size:14px;letter-spacing:1px;margin-bottom:2px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-subtitle{font-size:8px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-legend-item{font-size:8px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-legend-dot{width:9px;height:9px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-dow-cell{padding:2px 1px;font-size:9px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-date-cell{padding:1px 2px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-date-num{font-size:11px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-bar-name{font-size:8px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-bar-person{font-size:7px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-bar-memo{font-size:7px}
+  .kh-pt-paper[data-weeks="4"] .kh-pt-memo{font-size:7px}
+
+  /* 14日（2週）*/
+  .kh-pt-paper[data-weeks="2"] .kh-pt-title{font-size:18px;letter-spacing:2px;margin-bottom:3px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-subtitle{font-size:10px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-legend-item{font-size:10px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-legend-dot{width:11px;height:11px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-dow-cell{padding:5px 2px;font-size:12px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-date-cell{padding:3px 4px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-date-num{font-size:15px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-bar-name{font-size:11px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-bar-person{font-size:9px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-bar-memo{font-size:9px}
+  .kh-pt-paper[data-weeks="2"] .kh-pt-memo{font-size:10px}
+
+  /* 7日（1週）*/
+  .kh-pt-paper[data-weeks="1"] .kh-pt-title{font-size:22px;letter-spacing:3px;margin-bottom:4px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-subtitle{font-size:12px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-legend-item{font-size:12px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-legend-dot{width:14px;height:14px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-dow-cell{padding:8px 2px;font-size:16px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-date-cell{padding:5px 6px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-date-num{font-size:20px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-bar-name{font-size:14px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-bar-person{font-size:11px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-bar-memo{font-size:11px}
+  .kh-pt-paper[data-weeks="1"] .kh-pt-memo{font-size:12px}
 }
 `
 
@@ -307,6 +371,11 @@ const DayView = memo(function DayView({ which, filteredTasks, toggleDone, setPre
                     <span>🏢 {t.assignee || "未設定"}</span>
                     {days > 0 && <span>📆 {days + 1}日間</span>}
                   </div>
+                  {t.memo && (
+                    <div className="kh-card-memo" style={{borderLeftColor: c.bg}}>
+                      📝 {t.memo}
+                    </div>
+                  )}
                 </div>
                 <div className="kh-card-right">
                   <button className={`kh-card-done-btn${t.done ? " checked" : ""}`}
@@ -330,16 +399,112 @@ const DayView = memo(function DayView({ which, filteredTasks, toggleDone, setPre
 // ────────────────────────────────────────────────
 const ScheduleView = memo(function ScheduleView({
   filteredTasks, viewDays, base, navLabel, colDates,
-  toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, isMobile, todayKey
+  toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, isMobile, todayKey,
+  resizeTask
 }) {
-  const laidOut = useMemo(
-    () => layoutTasks(filteredTasks, viewDays, base),
-    [filteredTasks, viewDays, base]
-  )
+  const dragRef = useRef(null)
+  const [pendingResize, setPendingResize] = useState(null)
 
-  const maxLane = laidOut.reduce((m, t) => Math.max(m, t.lane), -1)
-  const LANE_H  = 26
-  const GRID_H  = Math.max((maxLane + 1) * LANE_H + 8, 56)
+  const laidOut = useMemo(() => {
+    const tasks = pendingResize
+      ? filteredTasks.map(t => t.id === pendingResize.id
+          ? {...t, start_key: pendingResize.startKey, end_key: pendingResize.endKey}
+          : t)
+      : filteredTasks
+    return layoutTasks(tasks, viewDays, base)
+  }, [filteredTasks, pendingResize, viewDays, base])
+
+  const maxLane  = laidOut.reduce((m, t) => Math.max(m, t.lane), -1)
+  const BAR_H    = 22
+  const MEMO_H   = 14  // メモ行の高さ
+  const LANE_H   = BAR_H + MEMO_H + 8  // バー + メモ + 余白
+  // メモがあるレーンはMEMO_H分追加
+  const laneHeights = useMemo(() => {
+    const arr = Array(maxLane + 1).fill(BAR_H + 8)
+    laidOut.forEach(t => { if (t.memo && t.lane <= maxLane) arr[t.lane] = BAR_H + MEMO_H + 8 })
+    return arr
+  }, [laidOut, maxLane])
+  const laneOffsets = useMemo(() => {
+    const offsets = []
+    let acc = 0
+    for (let i = 0; i <= maxLane; i++) { offsets.push(acc); acc += laneHeights[i] }
+    return offsets
+  }, [laneHeights, maxLane])
+  const GRID_H = Math.max((laneOffsets[maxLane] ?? 0) + (laneHeights[maxLane] ?? 0) + 8, 56)
+
+  const startResize = useCallback((e, task, edge, containerEl, wLen) => {
+    e.stopPropagation()
+    e.preventDefault()
+
+    // 全週のブロック（日付ヘッダー＋タスクエリア）の位置をドラッグ開始時に取得
+    const gridWrap = containerEl.closest('.kh-grid-wrap')
+    const taskAreas = gridWrap ? Array.from(gridWrap.querySelectorAll('.kh-week-block')) : [containerEl]
+    const weekBounds = taskAreas.map(el => {
+      const r = el.getBoundingClientRect()
+      return { top: r.top, bottom: r.bottom, left: r.left, width: r.width }
+    })
+    const colW = weekBounds[0].width / wLen
+
+    dragRef.current = {
+      edge, origTask: task, colW, weekBounds, wLen, base,
+      currentStart: task.start_key, currentEnd: task.end_key,
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const onMove = (ev) => {
+      const d = dragRef.current
+      if (!d) return
+
+      // カーソルがどの週の行にあるかをY座標で判定（最近傍の週にフォールバック）
+      let weekIdx = d.weekBounds.findIndex(b => ev.clientY >= b.top && ev.clientY < b.bottom)
+      if (weekIdx === -1) {
+        let minDist = Infinity
+        d.weekBounds.forEach((b, i) => {
+          const mid = (b.top + b.bottom) / 2
+          const dist = Math.abs(ev.clientY - mid)
+          if (dist < minDist) { minDist = dist; weekIdx = i }
+        })
+      }
+
+      // その週の中でのX位置から日を算出
+      const wb = d.weekBounds[weekIdx]
+      const xWithin = ev.clientX - wb.left
+      const dayInWeek = Math.max(0, Math.min(d.wLen - 1, Math.floor(xWithin / d.colW)))
+      const absDay = weekIdx * d.wLen + dayInWeek
+      const newDate = addDays(d.base, absDay)
+      const newKey  = toKey(newDate)
+
+      let newStart = d.origTask.start_key
+      let newEnd   = d.origTask.end_key
+      if (d.edge === 'right') {
+        if (newDate >= parseKey(d.origTask.start_key)) newEnd = newKey
+      } else {
+        if (newDate <= parseKey(d.origTask.end_key)) newStart = newKey
+      }
+
+      if (newStart !== d.currentStart || newEnd !== d.currentEnd) {
+        d.currentStart = newStart
+        d.currentEnd   = newEnd
+        setPendingResize({id: d.origTask.id, startKey: newStart, endKey: newEnd})
+      }
+    }
+
+    const onUp = () => {
+      const d = dragRef.current
+      if (!d) return
+      resizeTask(d.origTask.id, d.currentStart, d.currentEnd)
+      dragRef.current = null
+      setPendingResize(null)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+    }
+
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+  }, [resizeTask, base])
 
   const weeks = []
   for (let i = 0; i < viewDays; i += 7) weeks.push({ wo: i, days: colDates.slice(i, i + 7) })
@@ -397,35 +562,62 @@ const ScheduleView = memo(function ScheduleView({
                   const le = Math.min(t.endCol - wo, wLen - 1)
                   const span = le - ls + 1
                   const sh = t.col >= wo, eh = t.endCol < wo + wLen
+                  const isResizing = pendingResize?.id === t.id
+                  const laneTop = laneOffsets[t.lane] ?? t.lane * LANE_H
+                  const hasMemo = !!t.memo
                   return (
-                    <div key={t.id} className={`kh-task-bar${t.done ? " done" : ""}`}
+                    <div key={t.id} className={`kh-task-bar${t.done ? " done" : ""}${isResizing ? " resizing" : ""}`}
                       title={`${t.text}${t.assignee ? " ／ " + t.assignee : ""}`}
                       style={{
-                        top: t.lane * LANE_H + 3,
+                        top: laneTop + 2,
                         left: `calc(${ls * 100 / wLen}% + ${sh ? 2 : 0}px)`,
                         width: `calc(${span * 100 / wLen}% - ${(sh ? 2 : 0) + (eh ? 2 : 0)}px)`,
-                        height: LANE_H - 4,
+                        height: hasMemo ? BAR_H + MEMO_H : BAR_H,
                         background: c.bg,
                         borderRadius: `${sh ? 4 : 0}px ${eh ? 4 : 0}px ${eh ? 4 : 0}px ${sh ? 4 : 0}px`,
-                        paddingLeft: sh ? 5 : 2,
-                        paddingRight: eh ? 4 : 2,
-                        zIndex: 10
+                        paddingLeft: sh ? 14 : 2,
+                        paddingRight: eh ? 14 : 2,
+                        zIndex: isResizing ? 15 : 10,
+                        flexDirection: 'column',
+                        alignItems: 'stretch',
+                        overflow: 'hidden',
                       }}
                       onClick={() => setPreviewTask(t)}
                       role="button"
                       tabIndex={0}
                       aria-label={`タスク: ${t.text}`}
                       onKeyDown={e => e.key === "Enter" && setPreviewTask(t)}>
-                      {!sh && <span style={{marginRight:2,opacity:0.8,fontSize:8}}>◀</span>}
-                      <span className="kh-bar-text" style={{flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>
-                        {t.assignee && <span style={{opacity:0.7,marginRight:2}}>{t.assignee}</span>}
-                        {t.text}
-                      </span>
-                      {!eh && <span style={{marginLeft:2,opacity:0.8,fontSize:8}}>▶</span>}
-                      {eh && (
-                        <button className={`kh-done-check${t.done ? " checked" : ""}`}
-                          onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
-                          aria-label={t.done ? "未完了に戻す" : "完了にする"}>{t.done ? "✓" : ""}</button>
+                      {/* バー行 */}
+                      <div style={{display:'flex',alignItems:'center',height:BAR_H,flexShrink:0}}>
+                        {sh && (
+                          <div className="kh-resize-handle kh-resize-handle-left"
+                            onPointerDown={e => startResize(e, t, 'left', e.currentTarget.closest('.kh-task-area'), wLen)}
+                            onClick={e => e.stopPropagation()}
+                          />
+                        )}
+                        {!sh && <span style={{marginRight:2,opacity:0.8,fontSize:8}}>◀</span>}
+                        <span className="kh-bar-text" style={{flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>
+                          {t.assignee && <span style={{opacity:0.7,marginRight:2}}>{t.assignee}</span>}
+                          {t.text}
+                        </span>
+                        {!eh && <span style={{marginLeft:2,opacity:0.8,fontSize:8}}>▶</span>}
+                        {eh && (
+                          <button className={`kh-done-check${t.done ? " checked" : ""}`}
+                            onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
+                            aria-label={t.done ? "未完了に戻す" : "完了にする"}>{t.done ? "✓" : ""}</button>
+                        )}
+                        {eh && (
+                          <div className="kh-resize-handle kh-resize-handle-right"
+                            onPointerDown={e => startResize(e, t, 'right', e.currentTarget.closest('.kh-task-area'), wLen)}
+                            onClick={e => e.stopPropagation()}
+                          />
+                        )}
+                      </div>
+                      {/* メモ行 */}
+                      {hasMemo && sh && (
+                        <div className="kh-bar-memo" style={{borderLeftColor: c.bg}}>
+                          📝 {t.memo}
+                        </div>
                       )}
                     </div>
                   )
@@ -518,14 +710,15 @@ const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openM
 // PrintTab - 印刷専用タブ
 // ────────────────────────────────────────────────
 const PrintTab = memo(function PrintTab({
-  filteredTasks, viewDays, base, navLabel, colDates, isMobile,
+  filteredTasks, base, navLabel, isMobile,
   toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, todayKey,
-  printMemos, setPrintMemos
+  printMemos, setPrintMemos, printViewDays, setPrintViewDays
 }) {
   const canvasRef = useRef(null)
-  
-  // 定数をコンポーネント内で明示的に定義（ビルド時の変数名変換問題を回避）
-  const daysJa = ["日","月","火","水","木","金","土"]
+  const paperRef  = useRef(null)
+  const [subtitle, setSubtitle] = useState("")
+  const [printing, setPrinting] = useState(false)
+
   const colorList = [
     { id:"orange", label:"構造",   bg:"#E8521A", darker:"#C13D0F" },
     { id:"blue",   label:"設備",   bg:"#1A6FE8", darker:"#0F4FB0" },
@@ -535,177 +728,309 @@ const PrintTab = memo(function PrintTab({
     { id:"purple", label:"搬入",   bg:"#7C3AED", darker:"#5B21B6" },
     { id:"gray",   label:"その他", bg:"#52606D", darker:"#374151" },
   ]
-  
-  // レイアウトされたタスク
+
+  // 週数に応じたサイズ設定
+  const weekCount = printViewDays / 7
+  const PT_BAR  = weekCount === 1 ? 36 : weekCount === 2 ? 28 : 22
+  const PT_MEMO = weekCount === 1 ? 18 : weekCount === 2 ? 14 : 12
+  const DATE_H  = weekCount === 1 ? 40 : weekCount === 2 ? 30 : 24
+
+  const colDates = Array.from({ length: printViewDays }, (_, i) => addDays(base, i))
+
   const laidOut = useMemo(
-    () => layoutTasks(filteredTasks, viewDays, base),
-    [filteredTasks, viewDays, base]
+    () => layoutTasks(filteredTasks, printViewDays, base),
+    [filteredTasks, printViewDays, base]
   )
-  
-  // 週ごとにグループ化
+
   const weeks = []
-  for (let i = 0; i < viewDays; i += 7) weeks.push({ wo: i, days: colDates.slice(i, i + 7) })
-  
-  const addMemo = () => {
-    setPrintMemos([...printMemos, {
-      id: Date.now(),
-      text: "メモを入力",
-      x: 100,
-      y: 150,
-      fontSize: 14,
-      fontWeight: "normal"
-    }])
-  }
-  
-  const updateMemo = (id, updates) => {
-    setPrintMemos(printMemos.map(m => m.id === id ? {...m, ...updates} : m))
-  }
-  
-  const deleteMemo = (id) => {
-    setPrintMemos(printMemos.filter(m => m.id !== id))
-  }
-  
-  const handlePrintClick = () => {
-    window.print()
-  }
-  
-  // タイトルの月を取得
+  for (let i = 0; i < printViewDays; i += 7) weeks.push({ wo: i, days: colDates.slice(i, i + 7) })
+
   const titleMonth = colDates[0] ? `${colDates[0].getMonth() + 1}月` : ""
-  
-  // デバッグ用
-  console.log("PrintTab レンダリング:", { 
-    filteredTasksCount: filteredTasks.length, 
-    viewDays, 
-    colDatesLength: colDates.length,
-    weeksCount: weeks.length,
-    titleMonth,
-    COLORS_type: typeof COLORS,
-    COLORS_isArray: Array.isArray(COLORS),
-    COLORS_length: COLORS?.length
-  })
-  
+
+  const addMemo = () => {
+    setPrintMemos([...printMemos, { id: Date.now(), text: "メモを入力", x: 100, y: 200, fontSize: 13, fontWeight: "normal" }])
+  }
+  const updateMemo = (id, updates) => setPrintMemos(printMemos.map(m => m.id === id ? {...m, ...updates} : m))
+  const deleteMemo = (id) => setPrintMemos(printMemos.filter(m => m.id !== id))
+
+  // 画面をそのまま画像として印刷
+  const captureAndPrint = async () => {
+    if (!paperRef.current || printing) return
+    setPrinting(true)
+    // キャプチャ前に非表示にする要素を記録
+    const toolbars = paperRef.current.querySelectorAll('.kh-pt-memo-toolbar')
+    try {
+      // メモツールバーを一時的に非表示にしてキャプチャ
+      toolbars.forEach(el => { el.style.display = 'none' })
+
+      const canvas = await html2canvas(paperRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        onclone: (clonedDoc) => {
+          // クローン内のtextareaの値をDOMに反映（html2canvasはvalue属性を読むため）
+          clonedDoc.querySelectorAll('textarea').forEach(ta => {
+            ta.textContent = ta.value
+          })
+        }
+      })
+
+      const imgData = canvas.toDataURL('image/png')
+      const pw = canvas.width, ph = canvas.height
+
+      const win = window.open('', '_blank')
+      if (!win) {
+        alert('ポップアップがブロックされました。ブラウザの設定でポップアップを許可してください。')
+        return
+      }
+      // 印刷エリア：A4横(297×210mm) - 余白(左右各8mm、上8mm、下20mm)
+      // = 281mm × 182mm
+      // 画像のアスペクト比に合わせてどちらで制約するか計算
+      const areaW = 281, areaH = 182  // mm
+      const imgAspect = pw / ph
+      const areaAspect = areaW / areaH
+      let finalW, finalH
+      if (imgAspect > areaAspect) {
+        finalW = areaW; finalH = Math.floor(areaW / imgAspect)
+      } else {
+        finalH = areaH; finalW = Math.floor(areaH * imgAspect)
+      }
+
+      win.document.write(`<!DOCTYPE html><html><head>
+        <meta charset="UTF-8">
+        <title>工程表 印刷</title>
+        <style>
+          *{margin:0;padding:0;box-sizing:border-box}
+          @page{size:A4 landscape;margin:0}
+          html,body{width:297mm;height:210mm;overflow:hidden;background:#fff;padding:8mm 8mm 20mm 8mm}
+          img{display:block}
+        </style>
+      </head><body>
+        <img src="${imgData}" style="width:${finalW}mm;height:${finalH}mm" />
+        <script>
+          window.onload = function(){
+            setTimeout(function(){ window.print(); }, 300)
+          }
+        </script>
+      </body></html>`)
+      win.document.close()
+    } catch (err) {
+      console.error('印刷キャプチャエラー:', err)
+      alert('印刷の準備中にエラーが発生しました。')
+    } finally {
+      // エラーが起きても必ずツールバーを元に戻す
+      toolbars.forEach(el => { el.style.display = '' })
+      setPrinting(false)
+    }
+  }
+
   return (
     <div className="kh-print-tab">
       <div className="kh-print-toolbar">
-        <button className="kh-print-tool-btn" onClick={addMemo}>
-          ➕ メモ追加
-        </button>
-        <button className="kh-print-tool-btn kh-print-execute" onClick={handlePrintClick}>
-          🖨️ 印刷する
-        </button>
-        <div className="kh-print-hint">
-          メモをドラッグして移動、ダブルクリックで編集
-        </div>
-      </div>
-      <div className="kh-print-canvas" ref={canvasRef}>
-        {/* 印刷用ヘッダー */}
-        <div className="kh-print-page-header">
-          <h1 className="kh-print-title">{titleMonth} 工程表</h1>
-          <div className="kh-print-legend-bar">
-            {colorList.map(c => (
-              <div key={c.id} className="kh-print-legend-item">
-                <div className="kh-print-legend-dot" style={{background: c.bg}}></div>
-                <span className="kh-print-legend-label">{c.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        
-        {/* カレンダーグリッド */}
-        <div className="kh-print-calendar">
-          {/* 曜日ヘッダー */}
-          <div className="kh-print-dow-header">
-            {daysJa.map((d, i) => (
-              <div key={i} className={`kh-print-dow-cell${i === 0 ? " sun" : i === 6 ? " sat" : ""}`}>
-                {d}
-              </div>
-            ))}
-          </div>
-          
-          {/* 週ごとの表示 */}
-          {weeks.map(week => (
-            <div key={week.wo} className="kh-print-week">
-              {/* 日付とタスクを統合した行 */}
-              <div className="kh-print-date-row">
-                {week.days.map((d, idx) => {
-                  const dk = toKey(d)
-                  const isToday = dk === todayKey
-                  const dow = d.getDay()
-                  const dayTasks = laidOut.filter(t => {
-                    const s = parseKey(t.start_key), e = parseKey(t.end_key), day = parseKey(dk)
-                    return day >= s && day <= e
-                  })
-                  
-                  return (
-                    <div key={idx} className={`kh-print-date-cell${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}${isToday ? " today" : ""}`}>
-                      <div className="kh-print-date-num">{d.getDate()}</div>
-                      <div className="kh-print-task-list">
-                        {dayTasks.map(t => {
-                          const s = parseKey(t.start_key)
-                          const day = parseKey(dk)
-                          const isFirst = day.getTime() === s.getTime()
-                          const color = colorList.find(c => c.id === t.color) || colorList[0]
-                          const [company, person] = splitAssignee(t.assignee)
-                          
-                          return (
-                            <div
-                              key={t.id}
-                              className="kh-print-task-bar"
-                              style={{
-                                background: color.bg,
-                                borderLeft: `4px solid ${color.darker}`
-                              }}>
-                              <div className="kh-print-task-text">
-                                {isFirst && person && <div className="kh-print-task-person">{person}</div>}
-                                {isFirst && <div className="kh-print-task-name">{t.text}</div>}
-                                {!isFirst && <div className="kh-print-task-continue">→</div>}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+        <div style={{display:'flex',gap:4,marginRight:8}}>
+          {[7,14,28].map(n => (
+            <button key={n} className="kh-print-tool-btn"
+              style={{
+                padding:'6px 12px',
+                background: printViewDays === n ? '#F5C200' : 'rgba(255,255,255,0.1)',
+                color: printViewDays === n ? '#192536' : '#fff',
+                fontWeight: printViewDays === n ? 900 : 700,
+                borderColor: printViewDays === n ? '#F5C200' : 'rgba(255,255,255,0.25)'
+              }}
+              onClick={() => setPrintViewDays(n)}>{n}日</button>
           ))}
         </div>
-        
-        {/* メモ */}
-        {printMemos.map(memo => (
-          <div
-            key={memo.id}
-            className="kh-print-memo"
-            style={{
-              left: memo.x,
-              top: memo.y,
-              fontSize: memo.fontSize,
-              fontWeight: memo.fontWeight
-            }}
-            draggable
-            onDragEnd={(e) => {
-              const rect = canvasRef.current?.getBoundingClientRect()
-              if (rect) {
-                updateMemo(memo.id, {
-                  x: e.clientX - rect.left - 50,
-                  y: e.clientY - rect.top - 10
-                })
-              }
-            }}
-            onDoubleClick={() => {
-              const newText = prompt("メモを入力:", memo.text)
-              if (newText !== null) updateMemo(memo.id, {text: newText})
-            }}>
-            {memo.text}
-            <button className="kh-print-memo-delete" onClick={() => deleteMemo(memo.id)}>×</button>
-            <div className="kh-print-memo-controls">
-              <button onClick={() => updateMemo(memo.id, {fontSize: memo.fontSize + 2})}>A+</button>
-              <button onClick={() => updateMemo(memo.id, {fontSize: Math.max(8, memo.fontSize - 2)})}>A-</button>
-              <button onClick={() => updateMemo(memo.id, {fontWeight: memo.fontWeight === "bold" ? "normal" : "bold"})}>B</button>
+        <button className="kh-print-tool-btn" onClick={addMemo}>＋ メモ追加</button>
+        <button className="kh-print-tool-btn kh-print-execute"
+          onClick={captureAndPrint}
+          disabled={printing}
+          style={{opacity: printing ? 0.6 : 1, cursor: printing ? 'wait' : 'pointer'}}>
+          {printing ? '⏳ 準備中...' : '🖨 印刷する'}
+        </button>
+        <span className="kh-print-hint">{isMobile ? "メモ：長押しで編集、ドラッグで移動" : "メモはドラッグで移動、ダブルクリック/長押しで編集"}</span>
+      </div>
+      <div className="kh-pt-canvas" ref={canvasRef}>
+        <div className="kh-pt-paper" data-weeks={weekCount} ref={paperRef}>
+          {/* ヘッダー */}
+          <div className="kh-pt-header">
+            <div className="kh-pt-title">{titleMonth}　工程表</div>
+            <textarea
+              className="kh-pt-subtitle"
+              value={subtitle}
+              rows={1}
+              onChange={e => {
+                setSubtitle(e.target.value)
+                // 内容に合わせて高さを自動調整
+                e.target.style.height = 'auto'
+                e.target.style.height = e.target.scrollHeight + 'px'
+              }}
+              placeholder="工程フロー・備考等を入力（任意）"
+            />
+            <div className="kh-pt-legend">
+              {colorList.map(c => (
+                <div key={c.id} className="kh-pt-legend-item">
+                  <div className="kh-pt-legend-dot" style={{background: c.bg}} />
+                  <span>{c.label}</span>
+                </div>
+              ))}
             </div>
           </div>
-        ))}
+
+          {/* カレンダー */}
+          <div className="kh-pt-calendar">
+            <div className="kh-pt-dow-row">
+              {["日","月","火","水","木","金","土"].map((d,i) => (
+                <div key={i} className={`kh-pt-dow-cell${i===0?" sun":i===6?" sat":""}`}>{d}</div>
+              ))}
+            </div>
+
+            {weeks.map(week => {
+              const wo = week.wo
+              const weekTasks = laidOut.filter(t => t.col <= wo + 6 && t.endCol >= wo)
+              const maxLanePt = weekTasks.reduce((m, t) => Math.max(m, t.lane), -1)
+              const ptLaneH = (lane) => weekTasks.some(t => t.lane === lane && t.memo) ? PT_BAR + PT_MEMO + 6 : PT_BAR + 6
+              const ptLaneOffsets = []
+              let ptAcc = 0
+              for (let i = 0; i <= maxLanePt; i++) { ptLaneOffsets.push(ptAcc); ptAcc += ptLaneH(i) }
+              const ganttH = Math.max(ptAcc + 8, 38)
+
+              return (
+                <div key={wo} className="kh-pt-week">
+                  <div className="kh-pt-date-row">
+                    {week.days.map((d, idx) => {
+                      const dk = toKey(d)
+                      const dow = d.getDay()
+                      const isToday = dk === todayKey
+                      return (
+                        <div key={idx} className={`kh-pt-date-cell${dow===0?" sun":dow===6?" sat":""}${isToday?" today":""}`}
+                          style={{minHeight: DATE_H, fontSize: weekCount===1?18:weekCount===2?15:13}}>
+                          <span className="kh-pt-date-num">{d.getDate()}</span>
+                          {d.getDate() === 1 && <span className="kh-pt-date-month">{d.getMonth()+1}月</span>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="kh-pt-gantt" style={{minHeight: ganttH}}>
+                    {[1,2,3,4,5,6].map(i => (
+                      <div key={i} className="kh-pt-col-line" style={{left:`${i/7*100}%`}} />
+                    ))}
+                    {weekTasks.map(t => {
+                      const color = colorList.find(c => c.id === t.color) || colorList[0]
+                      const weekCol    = Math.max(0, t.col - wo)
+                      const weekEndCol = Math.min(6, t.endCol - wo)
+                      const weekSpan   = weekEndCol - weekCol + 1
+                      const isStart = t.col >= wo
+                      const isEnd   = t.endCol <= wo + 6
+                      const { company, person } = splitAssignee(t.assignee)
+                      const label = person || company || ""
+                      const borderRadius = isStart && isEnd ? '4px'
+                                         : isStart          ? '4px 0 0 4px'
+                                         : isEnd            ? '0 4px 4px 0' : '0'
+                      const ptTop = ptLaneOffsets[t.lane] ?? t.lane * (PT_BAR + 3)
+                      const hasMemoPt = !!t.memo && isStart
+                      return (
+                        <div
+                          key={t.id}
+                          className={`kh-pt-bar${t.done?" done":""}`}
+                          style={{
+                            left:   `${weekCol/7*100}%`,
+                            width:  `${weekSpan/7*100}%`,
+                            top:    ptTop + 2,
+                            height: hasMemoPt ? PT_BAR + PT_MEMO : PT_BAR,
+                            background: color.bg,
+                            borderRadius,
+                            borderRight: !isEnd ? `3px solid ${color.darker}` : undefined,
+                            flexDirection: 'column',
+                            alignItems: 'stretch',
+                            overflow: 'hidden',
+                          }}>
+                          <div style={{display:'flex',alignItems:'center',height:PT_BAR,flexShrink:0,fontSize: weekCount===1?13:weekCount===2?11:9}}>
+                            {!isStart && <span className="kh-pt-bar-startmark">◀</span>}
+                            <div className="kh-pt-bar-inner">
+                              {isStart && label && <div className="kh-pt-bar-person" style={{fontSize: weekCount===1?11:weekCount===2?9:8}}>{label}</div>}
+                              {isStart
+                                ? <div className="kh-pt-bar-name" style={{fontSize: weekCount===1?13:weekCount===2?11:9}}>{t.text}</div>
+                                : <div className="kh-pt-bar-cont">{t.text}</div>}
+                            </div>
+                            {!isEnd && <span className="kh-pt-bar-arrow">▶</span>}
+                          </div>
+                          {hasMemoPt && (
+                            <div className="kh-pt-bar-memo">📝 {t.memo}</div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* メモ */}
+          {printMemos.map(memo => {
+            const editText = () => {
+              const t = prompt("メモを入力:", memo.text)
+              if (t !== null) updateMemo(memo.id, {text: t})
+            }
+
+            const startDrag = (e) => {
+              if (e.target.tagName === 'BUTTON') return
+              e.preventDefault()
+              const el = e.currentTarget.closest('.kh-pt-memo')
+              const startX = e.clientX, startY = e.clientY
+              const origX = memo.x, origY = memo.y
+              let dragging = false
+              // タッチ操作のみ長押し編集（PCはダブルクリック）
+              let longPressTimer = e.pointerType === 'touch'
+                ? setTimeout(() => { longPressTimer = null; editText() }, 600)
+                : null
+
+              const cleanup = () => {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null }
+                document.removeEventListener('pointermove', onMove)
+                document.removeEventListener('pointerup', onUp)
+              }
+              const onMove = (ev) => {
+                if (!dragging) {
+                  if (Math.abs(ev.clientX - startX) < 4 && Math.abs(ev.clientY - startY) < 4) return
+                  dragging = true
+                  // ドラッグ開始したら長押しキャンセル
+                  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null }
+                  el.setPointerCapture(e.pointerId)
+                }
+                updateMemo(memo.id, {
+                  x: origX + (ev.clientX - startX),
+                  y: origY + (ev.clientY - startY),
+                })
+              }
+              const onUp = () => cleanup()
+
+              // documentレベルで登録→要素外で離してもクリーンアップされる
+              document.addEventListener('pointermove', onMove)
+              document.addEventListener('pointerup', onUp)
+            }
+
+            return (
+              <div key={memo.id} className="kh-pt-memo" style={{left: memo.x, top: memo.y}}>
+                {/* ツールバー（常時表示） */}
+                <div className="kh-pt-memo-toolbar" onPointerDown={startDrag}>
+                  <button onClick={() => updateMemo(memo.id, {fontSize: (memo.fontSize||12)+2})}>A＋</button>
+                  <button onClick={() => updateMemo(memo.id, {fontSize: Math.max(8, (memo.fontSize||12)-2)})}>A－</button>
+                  <button style={{fontWeight:'bold'}} onClick={() => updateMemo(memo.id, {fontWeight: memo.fontWeight==="bold"?"normal":"bold"})}>B</button>
+                  <button className="kh-pt-memo-del" onClick={() => deleteMemo(memo.id)}>✕</button>
+                </div>
+                {/* テキスト本体：ドラッグ可能、PC=ダブルクリック編集、スマホ=長押し編集 */}
+                <div className="kh-pt-memo-body"
+                  style={{fontSize: memo.fontSize||12, fontWeight: memo.fontWeight||'normal', cursor:'move'}}
+                  onPointerDown={startDrag}
+                  onDoubleClick={editText}>
+                  {memo.text}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -716,6 +1041,7 @@ const PrintTab = memo(function PrintTab({
 // ────────────────────────────────────────────────
 const EditModal = memo(function EditModal({
   editId, taskText, setTaskText, companyInput, setCompanyInput, personInput, setPersonInput,
+  memoInput, setMemoInput,
   startDate, setStartDate, endDate, setEndDate, selectedColor, setSelectedColor,
   assigneeHistory, setAssigneeHistory, saveTask, deleteTaskById, closeModal, taskTextRef
 }) {
@@ -812,7 +1138,7 @@ const EditModal = memo(function EditModal({
               onChange={e => onStartChange(e.target.value)}
               aria-label="開始日"/>
           </div>
-          <div style={{fontSize:20,color:"#C8C3BA",paddingBottom:8}}>→</div>
+          <div className="kh-date-arrow" style={{fontSize:20,color:"#C8C3BA",paddingBottom:8}}>→</div>
           <div className="kh-date-col">
             <div className="kh-field-label">🏁 終了日</div>
             <input type="date" className="kh-date-input" value={endDate}
@@ -821,6 +1147,11 @@ const EditModal = memo(function EditModal({
               aria-label="終了日"/>
           </div>
         </div>
+        <div className="kh-field-label">📝 メモ（任意）</div>
+        <textarea className="kh-memo-input" value={memoInput}
+          onChange={e => setMemoInput(e.target.value)}
+          placeholder="備考・注意事項など"
+          aria-label="メモ"/>
         <button className="kh-save-btn" onClick={saveTask}>{isEdit ? "更新する" : "追加する"}</button>
       </div>
     </div>
@@ -848,12 +1179,14 @@ export default function App() {
   const [taskText, setTaskText]               = useState("")
   const [companyInput, setCompanyInput]       = useState("")
   const [personInput, setPersonInput]         = useState("")
+  const [memoInput, setMemoInput]             = useState("")
   const [startDate, setStartDate]             = useState("")
   const [endDate, setEndDate]                 = useState("")
   const [toastMsg, setToastMsg]               = useState("")
   
   // 印刷用メモの状態
   const [printMemos, setPrintMemos]           = useState([])
+  const [printViewDays, setPrintViewDays]     = useState(28)
 
   // 担当者履歴をlocalStorageで永続化
   const [assigneeHistory, setAssigneeHistory] = useState(() => {
@@ -973,6 +1306,7 @@ export default function App() {
     const { company, person } = splitAssignee(task ? task.assignee : "")
     setCompanyInput(company)
     setPersonInput(person)
+    setMemoInput(task ? task.memo || "" : "")
     setModalOpen(true)
     setTimeout(() => taskTextRef.current?.focus(), 80)
   }, [])
@@ -1006,9 +1340,10 @@ export default function App() {
     setModalOpen(false)
 
     try {
+      const memo = memoInput.trim() || null
       if (editId) {
         const { error } = await supabase.from("tasks")
-          .update({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor })
+          .update({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, memo })
           .eq("id", editId)
         if (error) {
           console.error("更新エラー:", error)
@@ -1020,7 +1355,7 @@ export default function App() {
         console.log("✅ タスクを更新しました:", editId)
       } else {
         const { error } = await supabase.from("tasks")
-          .insert({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, done: false })
+          .insert({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, done: false, memo })
         if (error) {
           console.error("保存エラー:", error)
           showToast("保存に失敗しました: " + error.message)
@@ -1043,7 +1378,25 @@ export default function App() {
       suppressRTRef.current = false
       await loadTasks()
     }
-  }, [taskText, companyInput, personInput, editId, startDate, endDate, selectedColor, loadTasks, showToast])
+  }, [taskText, companyInput, personInput, memoInput, editId, startDate, endDate, selectedColor, loadTasks, showToast])
+
+  const resizeTask = useCallback(async (id, newStartKey, newEndKey) => {
+    setTasks(prev => prev.map(t => t.id === id ? {...t, start_key: newStartKey, end_key: newEndKey} : t))
+    try {
+      const { error } = await supabase.from("tasks")
+        .update({ start_key: newStartKey, end_key: newEndKey })
+        .eq("id", id)
+      if (error) {
+        console.error("リサイズエラー:", error)
+        showToast("更新に失敗しました")
+        await loadTasks()
+      }
+    } catch (err) {
+      console.error("リサイズエラー:", err)
+      showToast("更新中にエラーが発生しました")
+      await loadTasks()
+    }
+  }, [loadTasks, showToast])
 
   const deleteTaskById = useCallback(async (id) => {
     const prevTasks = tasks
@@ -1155,15 +1508,17 @@ export default function App() {
           navLabel={navLabel} colDates={colDates} isMobile={isMobile}
           toggleDone={toggleDone} deleteTaskById={deleteTaskById}
           setNavOffset={setNavOffset} openModal={openModal}
-          setPreviewTask={setPreviewTask} todayKey={todayKey}/>
+          setPreviewTask={setPreviewTask} todayKey={todayKey}
+          resizeTask={resizeTask}/>
       )}
       {currentTab === "print" && (
         <PrintTab
-          filteredTasks={filteredTasks} viewDays={viewDays} base={base}
-          navLabel={navLabel} colDates={colDates} isMobile={isMobile}
+          filteredTasks={filteredTasks} viewDays={printViewDays} base={base}
+          navLabel={navLabel} isMobile={isMobile}
           toggleDone={toggleDone} deleteTaskById={deleteTaskById}
           setNavOffset={setNavOffset} openModal={openModal}
           setPreviewTask={setPreviewTask} todayKey={todayKey}
+          printViewDays={printViewDays} setPrintViewDays={setPrintViewDays}
           printMemos={printMemos} setPrintMemos={setPrintMemos}/>
       )}
 
@@ -1176,6 +1531,7 @@ export default function App() {
           editId={editId} taskText={taskText} setTaskText={setTaskText}
           companyInput={companyInput} setCompanyInput={setCompanyInput}
           personInput={personInput} setPersonInput={setPersonInput}
+          memoInput={memoInput} setMemoInput={setMemoInput}
           startDate={startDate} setStartDate={setStartDate}
           endDate={endDate} setEndDate={setEndDate}
           selectedColor={selectedColor} setSelectedColor={setSelectedColor}
