@@ -152,7 +152,7 @@ body.kh-print-preview main *{overflow:visible !important;max-height:none !import
 
 /* ── Calendar print scaling: row heights grow as week-count shrinks ── */
 body.kh-print-preview [data-weeks]{height:auto !important;overflow:visible !important}
-body.kh-print-preview [data-weeks] > div{flex:none !important;height:auto !important}
+body.kh-print-preview [data-weeks] > div{display:grid !important;flex:none !important;height:auto !important}
 body.kh-print-preview [data-weeks="1"] > div{grid-template-rows:auto 600px !important}
 body.kh-print-preview [data-weeks="2"] > div{grid-template-rows:auto 300px 300px !important}
 body.kh-print-preview [data-weeks="3"] > div{grid-template-rows:auto repeat(3,200px) !important}
@@ -170,9 +170,9 @@ body.kh-print-preview [data-weeks="5"] > div{grid-template-rows:auto repeat(5,12
   main{overflow:visible !important;height:auto !important;position:static !important;padding:0 !important}
   main *{overflow:visible !important;max-height:none !important}
   *{text-shadow:none !important;animation:none !important}
-  /* Calendar: explicit row heights scale with week count so fewer weeks = larger cells */
+  /* Calendar: inner div becomes a grid, week rows get explicit heights */
   [data-weeks]{height:auto !important;overflow:visible !important}
-  [data-weeks] > div{flex:none !important;height:auto !important}
+  [data-weeks] > div{display:grid !important;flex:none !important;height:auto !important}
   [data-weeks="1"] > div{grid-template-rows:auto 155mm !important}
   [data-weeks="2"] > div{grid-template-rows:auto 77mm 77mm !important}
   [data-weeks="3"] > div{grid-template-rows:auto repeat(3,51mm) !important}
@@ -842,17 +842,19 @@ const GanttView = memo(function GanttView({ tasks, rangeStart, rangeDays, bp, on
 })
 
 // ────────────────────────────────────────────────
-// Calendar View (week rows × 7 cols, fills viewport)
+// Calendar View — week rows with spanning task bars
 // ────────────────────────────────────────────────
 const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, bp, onSelect, toggleDone, moveTask, onAddOn }) {
   const base = parseKey(rangeStart)
   const startOfWeek = addDays(base, -base.getDay())
   const weeks = Math.ceil((rangeDays + base.getDay()) / 7)
   const today = new Date(); today.setHours(0,0,0,0)
-  const maxItems = bp==='mobile'? 3 : (weeks>=4?4:6)
   const gridRef = useRef(null)
-  const [drag, setDrag] = useState(null)  // {id, deltaHalf}
+  const [drag, setDrag] = useState(null)
   const dragRef = useRef(null)
+
+  const DATE_H = bp === 'mobile' ? 24 : 26
+  const TASK_H = bp === 'mobile' ? 20 : 22
 
   const startDrag = useCallback((e, task, cellDate) => {
     e.stopPropagation(); e.preventDefault()
@@ -863,27 +865,22 @@ const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, 
     const rowH = (gridRect.height - 32) / weeks
     const startX = e.touches ? e.touches[0].clientX : e.clientX
     const startY = e.touches ? e.touches[0].clientY : e.clientY
-
-    // Determine drag mode based on which cell the user grabbed
     const sDate = parseKey(task.start_key)
     const eDate = parseKey(task.end_key)
     const sameStart = sameDay(cellDate, sDate)
     const sameEnd   = sameDay(cellDate, eDate)
     let mode
-    if(sameStart && sameEnd)      mode = 'resize-end'   // single-day → drag extends end (1日→2,3日へ伸ばせる)
-    else if(sameStart)            mode = 'resize-start' // start cell → move start
-    else if(sameEnd)              mode = 'resize-end'   // end cell → move end
-    else                          mode = 'move'         // middle → move whole
-
+    if(sameStart && sameEnd)      mode = 'resize-end'
+    else if(sameStart)            mode = 'resize-start'
+    else if(sameEnd)              mode = 'resize-end'
+    else                          mode = 'move'
     dragRef.current = { task, mode, cellW, rowH, startX, startY, deltaDays: 0, moved: false }
-
     const onMove = ev => {
       const d = dragRef.current; if(!d) return
       const x = ev.touches ? ev.touches[0].clientX : ev.clientX
       const y = ev.touches ? ev.touches[0].clientY : ev.clientY
       const dx = x - d.startX
       const dy = y - d.startY
-      // 半日単位スナップ（Shiftで1日単位に切り替え）
       const useCoarse = ev.shiftKey
       const stepX = useCoarse ? d.cellW : d.cellW/2
       const xCells = Math.round(dx / stepX) * (useCoarse ? 1 : 0.5)
@@ -908,8 +905,7 @@ const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, 
         const origEH = endHalf(t, base)
         let sH = origSH, eH = origEH
         if(d.mode === 'move'){
-          sH = origSH + deltaHalf
-          eH = origEH + deltaHalf
+          sH = origSH + deltaHalf; eH = origEH + deltaHalf
         } else if(d.mode === 'resize-start'){
           sH = Math.min(origSH + deltaHalf, origEH - 1)
         } else if(d.mode === 'resize-end'){
@@ -928,7 +924,6 @@ const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, 
     window.addEventListener('touchend', onUp)
   }, [base, moveTask, weeks])
 
-  // Apply pending drag delta
   const adjustedTasks = useMemo(()=>{
     if(!drag) return tasks
     const deltaHalf = Math.round(drag.deltaDays * 2)
@@ -938,8 +933,7 @@ const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, 
       const origEH = endHalf(t, base)
       let sH = origSH, eH = origEH
       if(drag.mode === 'move'){
-        sH = origSH + deltaHalf
-        eH = origEH + deltaHalf
+        sH = origSH + deltaHalf; eH = origEH + deltaHalf
       } else if(drag.mode === 'resize-start'){
         sH = Math.min(origSH + deltaHalf, origEH - 1)
       } else if(drag.mode === 'resize-end'){
@@ -952,129 +946,182 @@ const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, 
   }, [tasks, drag, base])
 
   return (
-    <div data-weeks={weeks} style={{height:'100%',display:'flex',flexDirection:'column',background:'var(--bg)',
-      padding:bp==='mobile'?6:10,overflow:'hidden'}}>
-      <div ref={gridRef} style={{flex:1,display:'grid',
-        gridTemplateColumns:'repeat(7,1fr)',
-        gridTemplateRows:`auto repeat(${weeks},1fr)`,
-        gap:0,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,overflow:'hidden',
-        minHeight:0}}>
-        {/* Day-of-week header */}
-        {DAYS_JA.map((d,i)=>(
-          <div key={i} style={{padding:'8px 6px',background:'var(--surface-2)',
-            borderBottom:'1px solid var(--border)',borderRight:i<6?'1px solid var(--border)':'none',
-            textAlign:'center',fontSize:11.5,fontWeight:700,fontFamily:'var(--font-jp)',
-            color:i===0?'var(--sun)':(i===6?'var(--sat)':'var(--text-2)')}}>{d}</div>
-        ))}
-        {/* Week rows */}
-        {Array.from({length:weeks}).map((_,wi)=>(
-          Array.from({length:7}).map((_,di)=>{
-            const date = addDays(startOfWeek, wi*7+di)
-            const dayTasks = adjustedTasks.filter(t=>{
-              const s = parseKey(t.start_key), e = parseKey(t.end_key)
-              return date >= s && date <= e
-            })
-            const isT = sameDay(date, today)
-            const we = isWeekend(date)
-            const outOfRange = date < base || date >= addDays(base, rangeDays)
-            return (
-              <div key={`${wi}-${di}`}
-                onClick={e=>{
-                  // Only fire if click target is the cell itself (not a task chip)
-                  if(e.target === e.currentTarget || e.target.dataset?.cellArea === '1'){
-                    if(!dragRef.current?.moved && !outOfRange) onAddOn?.(toKey(date))
-                  }
-                }}
-                style={{
-                borderRight:di<6?'1px solid var(--border)':'none',
-                borderBottom:wi<weeks-1?'1px solid var(--border)':'none',
-                background:isT?'var(--today)':(we?(di===0?'rgba(177,72,72,.04)':'rgba(47,93,160,.04)'):'var(--surface)'),
-                opacity:outOfRange?.45:1,padding:'5px 6px',display:'flex',flexDirection:'column',gap:3,
-                overflow:'hidden',minHeight:0,cursor:outOfRange?'default':'pointer',
-              }}>
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
-                  <div style={{display:'flex',alignItems:'baseline',gap:3}}>
-                    {date.getDate()===1 && <span style={{fontSize:10,color:'var(--text-3)',fontFamily:'var(--font-jp)',fontWeight:600}}>{date.getMonth()+1}月</span>}
-                    <span className="mono num" style={{fontSize:bp==='mobile'?14:15,fontWeight:700,
-                      color:isT?'var(--accent-2)':(di===0?'var(--sun)':(di===6?'var(--sat)':'var(--text)'))}}>{date.getDate()}</span>
-                  </div>
-                  {dayTasks.length>0 && (
-                    <span className="mono num" style={{fontSize:9.5,color:'var(--text-4)',fontWeight:600}}>{dayTasks.length}</span>
-                  )}
-                </div>
-                <div data-cell-area="1" style={{display:'flex',flexDirection:'column',gap:2,overflow:'hidden',flex:1,minHeight:0}}>
-                  {(()=>{
-                    const overflow = dayTasks.length - maxItems
-                    return (<>
-                      {dayTasks.slice(0,maxItems).map(t=>{
-                        const cat = catById(t.color)
-                        const isDragging = drag && drag.id === t.id
-                        const sDate = parseKey(t.start_key)
-                        const eDate = parseKey(t.end_key)
-                        const isStart = sameDay(date, sDate)
-                        const isEnd   = sameDay(date, eDate)
-                        const sFrac = t.start_frac>=0.5 ? 0.5 : 0
-                        const eFrac = t.end_frac>=0.5 ? 0.5 : 0
-                        const halfLeft  = isStart && sFrac>=0.5
-                        const halfRight = isEnd   && eFrac>=0.5
-                        const hasMemo = !!(t.memo && t.memo.trim())
-                        const showText = isStart || di === 0  // text only on start or Sunday
-                        return (
-                          <div key={t.id}
-                            onMouseDown={e=>{ if(e.button===0) startDrag(e,t,date) }}
-                            onTouchStart={e=>startDrag(e,t,date)}
-                            onClick={e=>{ if(!dragRef.current?.moved) onSelect(t) }}
-                            style={{
-                              display:'flex',flexDirection:'column',gap:1,
-                              cursor:isDragging?'grabbing':'grab',touchAction:'none',
-                              opacity:isDragging?.7:1,
-                              marginLeft:halfLeft?'50%':0,
-                              marginRight:halfRight?'50%':0,
-                              boxShadow:isDragging?'0 4px 12px rgba(0,0,0,.25)':'none',
-                            }}>
-                            <div style={{
-                              background:cat.color,color:'#fff',padding:'2px 6px',
-                              borderTopLeftRadius:isStart?3:0,
-                              borderBottomLeftRadius:isStart?3:0,
-                              borderTopRightRadius:isEnd?3:0,
-                              borderBottomRightRadius:isEnd?3:0,
-                              fontSize:bp==='mobile'?10:11,fontWeight:600,fontFamily:'var(--font-jp)',
-                              whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
-                              opacity:t.done?.5:1,lineHeight:1.4,minHeight:bp==='mobile'?16:18,
-                              textDecoration:t.done?'line-through':'none'}}>{showText ? t.text : ' '}</div>
-                            {hasMemo && (
-                              <div style={{
-                                padding:'1px 5px',
-                                fontSize:bp==='mobile'?9:9.5,fontWeight:600,
-                                color:cat.color,fontFamily:'var(--font-jp)',
-                                background:`${cat.color}22`,
-                                borderLeft:isStart?`2px solid ${cat.color}`:'none',
-                                borderTopLeftRadius:isStart?0:0,
-                                borderBottomLeftRadius:isStart?0:0,
-                                borderTopRightRadius:isEnd?3:0,
-                                borderBottomRightRadius:isEnd?3:0,
-                                whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
-                                minHeight:bp==='mobile'?13:14,
-                                opacity:t.done?.5:1,lineHeight:1.35,
-                              }}>{showText ? t.memo : ' '}</div>
-                            )}
-                          </div>
-                        )
-                      })}
-                      {overflow > 0 && (
-                        <div style={{fontSize:9.5,color:'var(--text-3)',fontFamily:'var(--font-jp)',fontWeight:600,marginTop:1}}>+{overflow}件</div>
-                      )}
-                    </>)
-                  })()}
-                </div>
-              </div>
-            )
+    <div data-weeks={weeks} style={{height:'100%',display:'flex',flexDirection:'column',
+      background:'var(--bg)',padding:bp==='mobile'?6:10,overflow:'hidden'}}>
+      <div ref={gridRef} style={{flex:1,display:'flex',flexDirection:'column',
+        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,
+        overflow:'hidden',minHeight:0}}>
+
+        {/* 曜日ヘッダー行 */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',flexShrink:0,
+          borderBottom:'1px solid var(--border)'}}>
+          {DAYS_JA.map((d,i)=>(
+            <div key={i} style={{padding:'8px 4px',background:'var(--surface-2)',
+              borderRight:i<6?'1px solid var(--border)':'none',
+              textAlign:'center',fontSize:11.5,fontWeight:700,fontFamily:'var(--font-jp)',
+              color:i===0?'var(--sun)':(i===6?'var(--sat)':'var(--text-2)')}}>{d}</div>
+          ))}
+        </div>
+
+        {/* 週行 */}
+        {Array.from({length:weeks}).map((_,wi)=>{
+          const rowStart = addDays(startOfWeek, wi*7)
+          const rowEnd   = addDays(startOfWeek, wi*7+6)
+
+          const rowTasks = adjustedTasks.filter(t=>{
+            const s=parseKey(t.start_key), e=parseKey(t.end_key)
+            return e >= rowStart && s <= rowEnd
           })
-        ))}
+
+          const laned = []
+          const laneEnds = []
+          for(const t of [...rowTasks].sort((a,b)=> a.start_key < b.start_key ? -1 : a.start_key > b.start_key ? 1 : 0)){
+            const s=parseKey(t.start_key), e=parseKey(t.end_key)
+            const colS = Math.max(0, diffDays(rowStart, s))
+            const colE = Math.min(6, diffDays(rowStart, e))
+            let lane = laneEnds.findIndex(lEnd => lEnd < colS)
+            if(lane===-1){ lane=laneEnds.length; laneEnds.push(-1) }
+            laneEnds[lane] = colE
+            laned.push({...t, lane, colS, colE,
+              isStart: s >= rowStart,
+              isEnd:   e <= rowEnd,
+            })
+          }
+
+          return (
+            <div key={wi} style={{flex:1,position:'relative',minHeight:0,
+              borderTop:wi>0?'1px solid var(--border)':'none'}}>
+
+              {/* 日付セル層（背景・日付数字・クリックハンドラ） */}
+              <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,
+                display:'grid',gridTemplateColumns:'repeat(7,1fr)'}}>
+                {Array.from({length:7}).map((_,di)=>{
+                  const date = addDays(rowStart, di)
+                  const isT = sameDay(date, today)
+                  const we = isWeekend(date)
+                  const outOfRange = date < base || date >= addDays(base, rangeDays)
+                  const nTasks = rowTasks.filter(t=>{
+                    const s=parseKey(t.start_key),e=parseKey(t.end_key)
+                    return date>=s && date<=e
+                  }).length
+                  return (
+                    <div key={di}
+                      onClick={e=>{
+                        if(!dragRef.current?.moved && !outOfRange) onAddOn?.(toKey(date))
+                      }}
+                      style={{
+                        borderRight:di<6?'1px solid var(--border)':'none',
+                        background:isT?'var(--today)':(we?(di===0?'rgba(177,72,72,.04)':'rgba(47,93,160,.04)'):'var(--surface)'),
+                        opacity:outOfRange?.45:1,
+                        padding:bp==='mobile'?'4px 3px 0':'5px 5px 0',
+                        cursor:outOfRange?'default':'pointer',
+                      }}>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',pointerEvents:'none'}}>
+                        <div style={{display:'flex',alignItems:'baseline',gap:2}}>
+                          {date.getDate()===1 && <span style={{fontSize:9,color:'var(--text-3)',fontFamily:'var(--font-jp)',fontWeight:600}}>{date.getMonth()+1}月</span>}
+                          <span className="mono num" style={{fontSize:bp==='mobile'?13:15,fontWeight:700,
+                            color:isT?'var(--accent-2)':(di===0?'var(--sun)':(di===6?'var(--sat)':'var(--text)'))}}>{date.getDate()}</span>
+                        </div>
+                        {nTasks>0 && <span className="mono num" style={{fontSize:9,color:'var(--text-4)',fontWeight:600}}>{nTasks}</span>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* タスクバー層 — 週行全幅で絶対配置、セル境界を越えてテキスト表示 */}
+              <div style={{position:'absolute',top:DATE_H,left:0,right:0,bottom:0,
+                overflow:'hidden',pointerEvents:'none'}}>
+                {laned.map(t=>{
+                  const cat = catById(t.color)
+                  const isDragging = drag && drag.id === t.id
+                  const hasMemo = !!(t.memo && t.memo.trim())
+                  const sFrac = t.start_frac>=0.5 ? 0.5 : 0
+                  const eFrac = t.end_frac>=0.5 ? 0.5 : 0
+                  const halfLeft  = t.isStart && sFrac>=0.5
+                  const halfRight = t.isEnd   && eFrac>=0.5
+                  const leftPct  = (t.colS + (halfLeft  ? 0.5 : 0)) / 7 * 100
+                  const rightPct = (t.colE + 1 - (halfRight ? 0.5 : 0)) / 7 * 100
+                  const topPx    = t.lane * TASK_H + 1
+                  return (
+                    <div key={t.id}
+                      onMouseDown={e=>{
+                        if(e.button!==0) return
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const relX = (e.clientX - rect.left) / rect.width
+                        const sDate=parseKey(t.start_key), eDate=parseKey(t.end_key)
+                        let cellDate
+                        if(sameDay(sDate,eDate))    cellDate = sDate
+                        else if(relX < 0.15)        cellDate = sDate
+                        else if(relX > 0.85)        cellDate = eDate
+                        else                        cellDate = addDays(sDate, 1)
+                        startDrag(e, t, cellDate)
+                      }}
+                      onTouchStart={e=>{
+                        const touch = e.touches[0]
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const relX = (touch.clientX - rect.left) / rect.width
+                        const sDate=parseKey(t.start_key), eDate=parseKey(t.end_key)
+                        let cellDate
+                        if(sameDay(sDate,eDate))    cellDate = sDate
+                        else if(relX < 0.15)        cellDate = sDate
+                        else if(relX > 0.85)        cellDate = eDate
+                        else                        cellDate = addDays(sDate, 1)
+                        startDrag(e, t, cellDate)
+                      }}
+                      onClick={e=>{ if(!dragRef.current?.moved) onSelect(t) }}
+                      style={{
+                        position:'absolute',
+                        left:`calc(${leftPct}% + 1px)`,
+                        width:`calc(${rightPct - leftPct}% - 2px)`,
+                        top:topPx,
+                        cursor:isDragging?'grabbing':'grab',
+                        touchAction:'none',
+                        opacity:isDragging?.7:1,
+                        boxShadow:isDragging?'0 4px 12px rgba(0,0,0,.25)':'none',
+                        pointerEvents:'auto',
+                        display:'flex',flexDirection:'column',gap:1,
+                        zIndex:isDragging?10:1,
+                      }}>
+                      <div style={{
+                        background:cat.color,color:'#fff',
+                        padding:`2px ${bp==='mobile'?4:6}px`,
+                        borderTopLeftRadius:    t.isStart?3:0,
+                        borderBottomLeftRadius: t.isStart?3:0,
+                        borderTopRightRadius:   t.isEnd?3:0,
+                        borderBottomRightRadius:t.isEnd?3:0,
+                        fontSize:bp==='mobile'?10:11,fontWeight:600,fontFamily:'var(--font-jp)',
+                        whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+                        opacity:t.done?.5:1,lineHeight:1.4,
+                        minHeight:bp==='mobile'?16:18,
+                        textDecoration:t.done?'line-through':'none',
+                      }}>{t.text}</div>
+                      {hasMemo && (
+                        <div style={{
+                          padding:'1px 5px',
+                          fontSize:bp==='mobile'?9:9.5,fontWeight:600,
+                          color:cat.color,fontFamily:'var(--font-jp)',
+                          background:`${cat.color}22`,
+                          borderLeft:t.isStart?`2px solid ${cat.color}`:'none',
+                          borderTopRightRadius:    t.isEnd?3:0,
+                          borderBottomRightRadius: t.isEnd?3:0,
+                          whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+                          minHeight:bp==='mobile'?13:14,
+                          opacity:t.done?.5:1,lineHeight:1.35,
+                        }}>{t.memo}</div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 })
+
 
 // ────────────────────────────────────────────────
 // Agenda View (responsive: 2-col on tablet+, 1-col mobile)
