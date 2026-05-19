@@ -1,23 +1,57 @@
-import { useState, useEffect, useCallback, useRef, memo, useMemo } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react"
 import { supabase } from "./supabaseClient"
 import html2canvas from "html2canvas"
 
+// ────────────────────────────────────────────────
+// Constants & mapping
+// ────────────────────────────────────────────────
 const DAYS_JA = ["日","月","火","水","木","金","土"]
-const COLORS = [
-  { id:"orange", label:"構造",   bg:"#E8521A", darker:"#C13D0F" },
-  { id:"blue",   label:"設備",   bg:"#1A6FE8", darker:"#0F4FB0" },
-  { id:"green",  label:"内装",   bg:"#1A9E5C", darker:"#0F7242" },
-  { id:"red",    label:"検査",   bg:"#D42020", darker:"#A01010" },
-  { id:"yellow", label:"定例",   bg:"#C49800", darker:"#936F00" },
-  { id:"purple", label:"搬入",   bg:"#7C3AED", darker:"#5B21B6" },
-  { id:"gray",   label:"その他", bg:"#52606D", darker:"#374151" },
+
+// Category list — derived from existing color system to preserve compatibility
+const CATEGORIES = [
+  { id:"orange", label:"構造",   en:"Structure",  color:"#C7522A" },
+  { id:"blue",   label:"設備",   en:"Equipment",  color:"#3B6FB0" },
+  { id:"green",  label:"内装",   en:"Interior",   color:"#4F8E5C" },
+  { id:"red",    label:"検査",   en:"Inspection", color:"#B53A3A" },
+  { id:"yellow", label:"定例",   en:"Meeting",    color:"#C99A2E" },
+  { id:"purple", label:"搬入",   en:"Delivery",   color:"#7B5BA8" },
+  { id:"gray",   label:"その他", en:"Other",      color:"#6B7280" },
+]
+const catById = id => CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length-1]
+
+// Preset assignees (suggestions only — free input also allowed)
+const PRESET_ASSIGNEES = [
+  { company:"佐藤組",     role:"元請" },
+  { company:"田中電気",   role:"設備" },
+  { company:"鈴木鉄工",   role:"鉄骨" },
+  { company:"伊藤内装",   role:"内装" },
+  { company:"森設備",     role:"空調" },
+  { company:"加藤工務店", role:"建築" },
 ]
 
-const toKey    = d    => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`
-const parseKey = k    => { const [y,m,d]=k.split("-"); return new Date(+y,+m-1,+d) }
+// ────────────────────────────────────────────────
+// Date helpers
+// ────────────────────────────────────────────────
+const toKey    = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`
+const parseKey = k => { const [y,m,d]=k.split("-"); return new Date(+y,+m-1,+d) }
 const addDays  = (d,n)=> new Date(d.getFullYear(), d.getMonth(), d.getDate()+n)
 const diffDays = (a,b)=> Math.round((b-a)/86400000)
+const fmtMD    = d => `${d.getMonth()+1}/${d.getDate()}`
+const sameDay  = (a,b)=> toKey(a)===toKey(b)
+const isWeekend= d => d.getDay()===0 || d.getDay()===6
 
+// Half-day helpers: encode positions in 0.5-day units
+// start_frac: 0 = morning start, 0.5 = afternoon start (half-day in)
+// end_frac:   0 = evening end, 0.5 = noon end (half-day before evening)
+const startHalf = (t, base) => diffDays(base, parseKey(t.start_key))*2 + (t.start_frac>=0.5?1:0)
+const endHalf   = (t, base) => (diffDays(base, parseKey(t.end_key))+1)*2 - (t.end_frac>=0.5?1:0)
+const halfToDayFrac = h => ({ day: Math.floor(h/2), frac: (h%2)===1 ? 0.5 : 0 })
+const endHalfToDayFrac = h => ({ day: Math.floor((h-1)/2), frac: ((h-1)%2)===0 ? 0.5 : 0 })
+// half position (h) for end means "end after halfH". end_day = day containing the last covered half. end_frac=0 means whole day, 0.5 means only morning
+
+// ────────────────────────────────────────────────
+// Assignee helpers
+// ────────────────────────────────────────────────
 function assigneeLabel(company, person) {
   const c=(company||"").trim(), p=(person||"").trim()
   if(c&&p) return `${c} ${p}`
@@ -30,6 +64,9 @@ function splitAssignee(str) {
   return {company:str.slice(0,idx), person:str.slice(idx+1)}
 }
 
+// ────────────────────────────────────────────────
+// Task layout (lane assignment)
+// ────────────────────────────────────────────────
 function layoutTasks(taskList, totalCols, base) {
   const placed = taskList.map(t=>{
     const s=diffDays(base,parseKey(t.start_key))
@@ -46,579 +83,1091 @@ function layoutTasks(taskList, totalCols, base) {
   return result
 }
 
+// ────────────────────────────────────────────────
+// Global styles
+// ────────────────────────────────────────────────
 const CSS = `
+:root{
+  --bg:#F5F2EC;--surface:#FFFFFF;--surface-2:#FAF8F3;--surface-3:#EEEAE0;
+  --border:#E2DDD2;--border-2:#D6CFC1;
+  --text:#1B1D21;--text-2:#4B4F57;--text-3:#82858C;--text-4:#A7A9AF;
+  --accent:#E4A11A;--accent-2:#C98A0E;--today:#FFF1C9;
+  --sun:#B14848;--sat:#2F5DA0;
+  --radius:8px;--radius-sm:6px;--radius-lg:12px;
+  --shadow-sm:0 1px 2px rgba(20,18,12,.04),0 0 0 1px rgba(20,18,12,.04);
+  --shadow:0 2px 6px rgba(20,18,12,.05),0 1px 2px rgba(20,18,12,.04);
+  --shadow-lg:0 12px 32px rgba(20,18,12,.10),0 4px 12px rgba(20,18,12,.06);
+  --font-sans:"IBM Plex Sans","Noto Sans JP",system-ui,-apple-system,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --font-jp:"Noto Sans JP",system-ui,sans-serif;
+}
+[data-theme="dark"]{
+  --bg:#0E1014;--surface:#161A21;--surface-2:#1C2129;--surface-3:#232932;
+  --border:#2A303A;--border-2:#353C48;
+  --text:#ECEEF2;--text-2:#B6BAC2;--text-3:#7D828B;--text-4:#5C616B;
+  --today:#3A2E0E;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4),0 0 0 1px rgba(255,255,255,.04);
+  --shadow:0 4px 12px rgba(0,0,0,.4),0 1px 2px rgba(0,0,0,.3);
+  --shadow-lg:0 16px 40px rgba(0,0,0,.5),0 4px 12px rgba(0,0,0,.3);
+}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:#EDEAE3;font-family:system-ui,"Hiragino Kaku Gothic ProN",sans-serif;min-height:100vh}
-.kh-header{background:#192536;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:400;box-shadow:0 2px 12px rgba(0,0,0,0.4)}
-.kh-htitle{color:#F5C200;font-size:10px;font-weight:800;letter-spacing:2px}
-.kh-hmonth{color:#fff;font-size:15px;font-weight:900}
-.kh-hmode{color:#22A86E;font-size:10px;font-weight:700;margin-top:1px}
-.kh-day-btns{display:flex;gap:4px}
-.kh-day-btn{padding:4px 9px;border-radius:6px;border:none;cursor:pointer;font-weight:800;font-size:11px;min-height:32px;touch-action:manipulation}
-@media (max-width: 768px) {
-  .kh-day-btn{min-height:38px;padding:5px 10px}
-}
-.kh-tabs{display:flex;background:#192536;border-bottom:2px solid #0f1a27}
-.kh-tab{flex:1;padding:9px 0;text-align:center;font-size:13px;font-weight:700;color:rgba(255,255,255,0.5);cursor:pointer;border:none;background:transparent;border-bottom:3px solid transparent;transition:all 0.15s}
-.kh-tab.active{color:#F5C200;border-bottom-color:#F5C200}
-.kh-filter-bar{background:#fff;padding:8px 12px;display:flex;gap:8px;align-items:center;border-bottom:1px solid #E0DBD3;flex-wrap:wrap;-webkit-overflow-scrolling:touch}
-.kh-filter-bar input{flex:1;min-width:100px;padding:6px 10px;border-radius:20px;border:1.5px solid #D5D0C8;font-size:13px;outline:none;background:#FAFAF8}
-.kh-filter-bar input:focus{border-color:#192536}
-.kh-filter-chips{display:flex;gap:4px;flex-wrap:wrap}
-.kh-chip{padding:4px 10px;border-radius:20px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#EEE;color:#555;transition:all 0.12s}
-.kh-chip.active{color:#fff}
-.kh-filter-clear{padding:4px 10px;border-radius:20px;border:1.5px solid #D5D0C8;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#888;white-space:nowrap}
-.kh-nav{display:flex;align-items:center;justify-content:space-between;padding:8px 14px 4px}
-.kh-nav-btn{background:#192536;color:#fff;border:none;border-radius:8px;padding:7px 14px;font-weight:700;font-size:13px;cursor:pointer}
-@media (max-width: 768px) {
-  .kh-nav-btn{min-height:44px;min-width:44px}
-}
-.kh-nav-label{font-size:12px;color:#555;font-weight:700}
-.kh-zoom-hint{text-align:center;font-size:11px;color:#888;padding:2px 0 4px}
-.kh-grid-wrap{padding:0 8px 16px}
-.kh-week-block{margin-bottom:8px}
-.kh-day-header{display:grid;gap:2px;margin-bottom:2px}
-.kh-day-cell{background:#fff;border:1px solid #D5D0C8;border-radius:5px;padding:4px 5px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;min-height:32px;overflow:hidden}
-.kh-day-cell:hover{opacity:0.85}
-.kh-day-cell.today{background:#F5C200;border:2px solid #C8A200}
-.kh-day-cell.sun{background:#FFECEC}
-.kh-day-cell.sat{background:#ECEFFF}
-.kh-day-left{display:flex;align-items:baseline;gap:1px;white-space:nowrap}
-.kh-dow{font-size:10px;font-weight:700;color:#888;flex-shrink:0}
-.kh-dow.sun{color:#B00}.kh-dow.sat{color:#006}
-.kh-dnum{font-size:14px;font-weight:900;color:#1C2B3A;flex-shrink:0}
-.kh-dnum.sun{color:#C00}.kh-dnum.sat{color:#006}
-.kh-dmonth{font-size:11px;color:#666;font-weight:700;flex-shrink:0}
-.kh-plus{font-size:12px;color:#BBB;flex-shrink:0}
-@media (max-width: 768px) {
-  .kh-day-cell{padding:3px 4px;min-height:28px}
-  .kh-dmonth{font-size:10px}
-  .kh-dnum{font-size:12px}
-  .kh-dow{font-size:9px}
-  .kh-plus{font-size:10px}
-}
-.kh-task-area{position:relative;background:rgba(255,255,255,0.5);border-radius:6px;border:1px solid #D5D0C8;overflow:hidden}
-.kh-col-grid{position:absolute;inset:0;display:grid;pointer-events:none}
-.kh-col-div{border-right:1px dashed #E0DBD3}
-.kh-task-bar{position:absolute;display:flex;align-items:center;cursor:pointer;overflow:hidden;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.2);font-size:9px;font-weight:700;color:#fff;transition:opacity 0.15s;touch-action:manipulation}
-.kh-task-bar:hover{opacity:0.88}
-.kh-task-bar.resizing{opacity:0.9;box-shadow:0 2px 12px rgba(0,0,0,0.35)}
-.kh-task-bar.done{opacity:0.4}
-.kh-resize-handle{position:absolute;top:0;bottom:0;width:9px;z-index:20;cursor:col-resize;background:transparent;display:flex;align-items:center;justify-content:center;touch-action:none}
-.kh-resize-handle::after{content:"";display:block;width:2px;height:60%;background:rgba(255,255,255,0.5);border-radius:2px}
-.kh-resize-handle:hover::after{background:rgba(255,255,255,0.9)}
-.kh-resize-handle-left{left:0;border-radius:4px 0 0 4px}
-.kh-resize-handle-right{right:0;border-radius:0 4px 4px 0}
-@media (max-width: 768px) {
-  .kh-resize-handle{width:20px}
-  .kh-resize-handle::after{width:3px;height:55%}
-}
-.kh-task-bar.done .kh-bar-text{text-decoration:line-through}
-.kh-done-check{flex-shrink:0;width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,0.8);background:transparent;margin-left:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff;transition:background 0.15s;touch-action:manipulation}
-.kh-done-check.checked{background:rgba(255,255,255,0.9);color:#1A9E5C}
-@media (max-width: 768px) {
-  .kh-done-check{width:20px;height:20px;font-size:10px}
-}
-.kh-legend{padding:4px 12px 16px;display:flex;flex-wrap:wrap;gap:6px}
-.kh-legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:#555;font-weight:600}
-.kh-legend-dot{width:12px;height:12px;border-radius:3px;flex-shrink:0}
-.kh-day-view{padding:12px}
-.kh-dv-header{font-size:13px;font-weight:800;color:#192536;margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.kh-dv-badge{background:#F5C200;color:#192536;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:800}
-.kh-dv-empty{background:#fff;border-radius:10px;padding:32px;text-align:center;color:#AAA;font-size:14px;border:1px solid #E0DBD3}
-.kh-card{background:#fff;border-radius:10px;border:1px solid #E0DBD3;margin-bottom:8px;overflow:hidden;display:flex;align-items:stretch;box-shadow:0 2px 8px rgba(0,0,0,0.06);transition:opacity 0.2s}
-.kh-card.done{opacity:0.5}
-.kh-card-accent{width:6px;flex-shrink:0}
-.kh-card-body{flex:1;padding:12px 14px;cursor:pointer}
-.kh-card-title{font-size:16px;font-weight:800;color:#192536;margin-bottom:4px}
-.kh-card.done .kh-card-title{text-decoration:line-through}
-.kh-card-meta{font-size:12px;color:#888;display:flex;gap:8px;flex-wrap:wrap}
-.kh-card-right{display:flex;align-items:center;padding:0 14px}
-.kh-card-done-btn{width:36px;height:36px;border-radius:50%;border:2.5px solid #D5D0C8;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;transition:all 0.15s;color:transparent}
-.kh-card-done-btn.checked{background:#1A9E5C;border-color:#1A9E5C;color:#fff}
-.kh-dv-summary{text-align:center;font-size:12px;color:#888;padding:8px 0;font-weight:600}
-.kh-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;justify-content:center;z-index:500}
-.kh-modal{background:#fff;border-radius:20px 20px 0 0;padding:24px 20px 40px;width:100%;max-width:520px;max-height:92vh;overflow-y:auto}
-.kh-modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
-.kh-modal-title{font-weight:900;font-size:17px;color:#192536}
-.kh-del-btn{background:#FDEAEA;border:none;border-radius:8px;color:#C00;font-weight:700;font-size:12px;padding:6px 12px;cursor:pointer}
-.kh-field-label{font-size:11px;font-weight:700;color:#888;margin-bottom:5px}
-.kh-task-input{width:100%;padding:12px 14px;border-radius:10px;border:2px solid #E0DBD3;font-size:14px;outline:none;margin-bottom:14px;font-family:inherit}
-.kh-task-input:focus{border-color:#192536}
-@media (max-width: 768px) {
-  .kh-task-input{font-size:16px}
-  .kh-memo-input{font-size:16px}
-  .kh-filter-bar input{font-size:16px}
-}
-.kh-assignee-wrap{margin-bottom:14px}
-.kh-assignee-row{display:flex;gap:8px;margin-bottom:6px}
-.kh-assignee-input{flex:1;padding:10px 12px;border-radius:10px;border:2px solid #E0DBD3;font-size:13px;outline:none;font-family:inherit;background:#FAFAF8;min-width:0}
-.kh-assignee-input:focus{border-color:#192536}
-@media (max-width: 768px) {
-  .kh-assignee-row{flex-direction:column;gap:6px}
-  .kh-assignee-input{font-size:16px}
-}
-.kh-history-label{font-size:10px;font-weight:700;color:#AAA;margin:8px 0 5px;letter-spacing:0.5px}
-.kh-assignee-history{display:flex;gap:6px;flex-wrap:wrap}
-.kh-history-item{display:inline-flex;align-items:center;border-radius:20px;border:1.5px solid #D5D0C8;background:#FAFAF8;overflow:hidden;font-size:11px;font-weight:600}
-.kh-history-name{padding:4px 8px 4px 12px;cursor:pointer;color:#444;border:none;background:transparent;font-family:inherit;font-size:11px;font-weight:600;white-space:nowrap}
-.kh-history-name:hover{color:#192536}
-.kh-history-del{padding:4px 9px 4px 2px;cursor:pointer;color:#CCC;border:none;background:transparent;font-size:13px;line-height:1}
-.kh-history-del:hover{color:#D42020}
-.kh-date-row{display:flex;gap:10px;margin-bottom:14px;align-items:flex-end}
-.kh-date-col{flex:1}
-.kh-date-input{width:100%;padding:10px 12px;border-radius:10px;border:2px solid #E0DBD3;font-size:13px;outline:none;font-family:inherit;background:#FAFAF8}
-@media (max-width: 768px) {
-  .kh-date-row{flex-direction:column;gap:6px;align-items:stretch}
-  .kh-date-col{flex:none}
-  .kh-date-input{font-size:16px;padding:12px 14px}
-  .kh-date-arrow{display:none}
-}
-.kh-color-btns{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
-.kh-color-btn{border:none;border-radius:8px;padding:7px 12px;font-weight:800;font-size:12px;cursor:pointer;color:#fff;transition:transform 0.12s}
-.kh-save-btn{width:100%;background:#192536;color:#fff;border:none;border-radius:12px;padding:14px;font-weight:900;font-size:15px;cursor:pointer}
-.kh-memo-input{width:100%;padding:10px 12px;border-radius:10px;border:2px solid #E0DBD3;font-size:13px;outline:none;font-family:inherit;background:#FAFAF8;resize:vertical;min-height:68px;margin-bottom:14px;line-height:1.5}
-.kh-memo-input:focus{border-color:#192536}
-.kh-bar-memo{flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:9px;font-weight:600;color:#333;padding:1px 6px;background:rgba(255,255,255,0.88);pointer-events:none;line-height:14px}
-.kh-card-memo{margin-top:5px;padding:6px 9px;background:#FAFAF8;border-left:3px solid #D5D0C8;border-radius:0 4px 4px 0;font-size:12px;color:#555;line-height:1.55;white-space:pre-wrap;word-break:break-all}
-.kh-pt-bar-memo{font-size:8px;color:#333;line-height:1.4;padding:2px 4px;background:rgba(255,255,255,0.85);border-radius:0 0 3px 3px;overflow:hidden;white-space:pre-wrap;word-break:break-all}
-.kh-preview-bg{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:flex-end;justify-content:center;z-index:490;animation:kh-fadein 0.15s ease}
-@keyframes kh-fadein{from{opacity:0}to{opacity:1}}
-.kh-preview-card{background:#fff;border-radius:24px 24px 0 0;width:100%;max-width:520px;padding:0 0 40px;box-shadow:0 -8px 40px rgba(0,0,0,0.25);animation:kh-slideup 0.2s cubic-bezier(0.34,1.2,0.64,1)}
-@keyframes kh-slideup{from{transform:translateY(60px);opacity:0}to{transform:translateY(0);opacity:1}}
-.kh-preview-accent{border-radius:24px 24px 0 0;padding:18px 20px 16px;display:flex;align-items:flex-start;justify-content:space-between}
-.kh-preview-close{width:32px;height:32px;border-radius:50%;border:none;background:rgba(255,255,255,0.25);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:10px;line-height:1}
-.kh-preview-type-badge{display:inline-block;background:rgba(255,255,255,0.22);color:#fff;font-size:11px;font-weight:800;padding:3px 10px;border-radius:20px;margin-bottom:8px;letter-spacing:0.5px}
-.kh-preview-title{color:#fff;font-size:22px;font-weight:900;line-height:1.3;word-break:break-all}
-.kh-preview-body{padding:20px 20px 0}
-.kh-preview-daterange{background:#F0F4FF;border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center}
-.kh-preview-date-block{flex:1;text-align:center}
-.kh-preview-date-label{font-size:10px;font-weight:800;color:#888;margin-bottom:4px;letter-spacing:0.5px}
-.kh-preview-date-value{font-size:20px;font-weight:900;color:#192536;line-height:1.1}
-.kh-preview-date-sub{font-size:11px;color:#888;margin-top:2px}
-.kh-preview-date-arrow{font-size:22px;color:#CBD5E1;padding:0 12px;flex-shrink:0}
-.kh-preview-duration{background:#192536;color:#F5C200;border-radius:20px;font-size:13px;font-weight:900;padding:4px 14px;text-align:center;margin:0 auto 16px;display:table}
-.kh-preview-info-row{display:flex;gap:10px;margin-bottom:10px}
-.kh-preview-info-item{flex:1;background:#F8FAFC;border-radius:12px;padding:12px 14px;border:1px solid #E2E8F0}
-.kh-preview-info-label{font-size:10px;font-weight:800;color:#94A3B8;margin-bottom:5px;letter-spacing:0.5px}
-.kh-preview-info-value{font-size:16px;font-weight:800;color:#1E293B;word-break:break-all}
-.kh-preview-info-value.empty{color:#CBD5E1;font-size:14px;font-weight:600}
-.kh-preview-done-badge{display:inline-flex;align-items:center;gap:4px;background:#DCFCE7;color:#16A34A;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:800;margin-bottom:14px}
-.kh-preview-actions{display:flex;gap:10px;padding:0 20px;margin-top:20px}
-.kh-preview-edit-btn{flex:1;padding:15px;background:#192536;color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
-.kh-preview-done-btn{padding:15px 18px;border:2px solid #E2E8F0;background:#fff;color:#64748B;border-radius:14px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px}
-.kh-preview-done-btn.is-done{background:#DCFCE7;border-color:#86EFAC;color:#16A34A}
-.kh-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#D42020;color:#fff;padding:10px 20px;border-radius:12px;font-size:13px;font-weight:700;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.3);animation:kh-fadein 0.2s ease}
-.kh-print-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#192536;color:#F5C200;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:400;display:flex;align-items:center;justify-content:center;transition:transform 0.2s}
-.kh-print-btn:hover{transform:scale(1.1)}
-.kh-print-tab{width:100%;height:calc(100vh - 140px);display:flex;flex-direction:column;background:#e0e0e0;overflow:hidden}
-.kh-print-toolbar{background:#192536;padding:10px 20px;display:flex;align-items:center;gap:10px;flex-shrink:0;border-bottom:2px solid #F5C200;flex-wrap:wrap}
-.kh-print-tool-btn{padding:8px 18px;background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;transition:all 0.15s;white-space:nowrap}
-.kh-print-tool-btn:hover{background:rgba(255,255,255,0.2)}
-.kh-print-execute{background:#F5C200;color:#192536;border-color:#F5C200;font-weight:900}
-.kh-print-execute:hover{background:#ffd700}
-.kh-print-hint{color:#64748b;font-size:11px;margin-left:auto}
-@media (max-width: 768px) {
-  .kh-print-toolbar{padding:6px 8px;gap:4px}
-  .kh-print-tool-btn{padding:7px 10px;font-size:12px}
-  .kh-print-hint{display:none}
-}
-.kh-pt-canvas{flex:1;overflow:auto;background:#d0d0d0;display:flex;justify-content:center;align-items:flex-start;padding:20px 16px}
-.kh-pt-paper{background:#fff;width:100%;max-width:calc((100vh - 200px) * 297 / 210);aspect-ratio:297/210;padding:14px 16px;box-shadow:0 6px 28px rgba(0,0,0,0.22);flex-shrink:0;position:relative;display:flex;flex-direction:column}
-.kh-pt-header{flex-shrink:0;margin-bottom:4px}
-.kh-pt-title{font-size:22px;font-weight:900;color:#192536;letter-spacing:3px;text-align:center;margin-bottom:3px}
-.kh-pt-subtitle{width:100%;padding:3px 8px;border:1px dashed #ccc;border-radius:4px;font-size:11px;color:#333;outline:none;background:transparent;font-family:inherit;margin-bottom:4px;display:block;resize:none;overflow:hidden;line-height:1.6;min-height:22px;word-break:break-all;white-space:pre-wrap}
-.kh-pt-subtitle:focus{border-color:#192536;background:#fffef8}
-.kh-pt-subtitle::placeholder{color:#ccc}
-.kh-pt-legend{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-bottom:5px}
-.kh-pt-legend-item{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:#333}
-.kh-pt-legend-dot{width:13px;height:13px;border-radius:2px;flex-shrink:0}
-.kh-pt-calendar{border:2px solid #222;width:100%;display:flex;flex-direction:column;flex:1;min-height:0}
-.kh-pt-dow-row{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:2px solid #222;flex-shrink:0}
-.kh-pt-dow-cell{padding:4px 2px;text-align:center;font-size:12px;font-weight:900;background:#192536;color:#F5C200;border-right:1px solid #444}
-.kh-pt-dow-cell:last-child{border-right:none}
-.kh-pt-dow-cell.sun{color:#ff9999}
-.kh-pt-dow-cell.sat{color:#aaccff}
-.kh-pt-week{border-bottom:1px solid #aaa;flex:1;display:flex;flex-direction:column;min-height:0}
-.kh-pt-week:last-child{border-bottom:none}
-.kh-pt-date-row{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #ddd;flex-shrink:0}
-.kh-pt-date-cell{padding:3px 5px;border-right:1px solid #ddd;background:#fff}
-.kh-pt-date-cell:last-child{border-right:none}
-.kh-pt-date-cell.sun{background:#fff2f2}
-.kh-pt-date-cell.sat{background:#f2f4ff}
-.kh-pt-date-cell.today{background:#fffde6;box-shadow:inset 0 0 0 2px #F5C200}
-.kh-pt-date-num{font-size:15px;font-weight:900;color:#1C2B3A;line-height:1.1;display:inline}
-.kh-pt-date-cell.sun .kh-pt-date-num{color:#c00}
-.kh-pt-date-cell.sat .kh-pt-date-num{color:#006}
-.kh-pt-date-cell.today .kh-pt-date-num{color:#b08000}
-.kh-pt-date-month{font-size:9px;font-weight:700;color:#999;margin-left:3px}
-.kh-pt-gantt{position:relative;width:100%;background:#f8f8f8;flex:1;min-height:0}
-.kh-pt-col-line{position:absolute;top:0;bottom:0;width:1px;background:rgba(0,0,0,0.07);pointer-events:none}
-.kh-pt-bar{position:absolute;display:flex;align-items:center;overflow:hidden;font-size:10px;font-weight:700;color:#fff;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.22)}
-.kh-pt-bar.done{opacity:0.38}
-.kh-pt-bar-inner{display:flex;flex-direction:column;padding:1px 5px;overflow:hidden;flex:1;min-width:0}
-.kh-pt-bar-person{font-size:8px;font-weight:900;line-height:1.1;overflow:hidden;text-overflow:ellipsis;opacity:0.92}
-.kh-pt-bar-name{font-size:9px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis}
-.kh-pt-bar-cont{font-size:8px;opacity:0.6;overflow:hidden;text-overflow:ellipsis}
-.kh-pt-bar-arrow{flex-shrink:0;font-size:10px;padding-right:4px;line-height:1}
-.kh-pt-bar-startmark{flex-shrink:0;font-size:10px;padding-left:3px;opacity:0.7;line-height:1}
-.kh-pt-memo{position:absolute;background:#fff9c4;border:2px solid #ffd700;border-radius:6px;padding:0;cursor:move;box-shadow:0 2px 6px rgba(0,0,0,0.15);color:#000;font-weight:600;min-width:100px;user-select:none;z-index:10;font-size:12px;display:flex;flex-direction:column;touch-action:none}
-.kh-pt-memo-toolbar{display:flex;align-items:center;gap:2px;background:#ffd700;padding:2px 4px;border-radius:4px 4px 0 0;flex-shrink:0}
-.kh-pt-memo-toolbar button{background:#fff;border:none;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer;border-radius:3px;line-height:1.4;min-height:28px;min-width:28px}
-.kh-pt-memo-toolbar button:hover{background:#192536;color:#F5C200}
-@media (max-width: 768px) {
-  .kh-pt-memo-toolbar button{padding:4px 10px;font-size:12px;min-height:36px;min-width:36px}
-}
-.kh-pt-memo-del{background:#D42020 !important;color:#fff !important;margin-left:auto}
-.kh-pt-memo-del:hover{background:#a00 !important;color:#fff !important}
-.kh-pt-memo-body{padding:5px 9px;line-height:1.5}
-@media print {
-  @page{size:A4 landscape;margin:4mm 6mm}
-  body{background:#fff;margin:0;padding:0}
-  .kh-header,.kh-tabs,.kh-filter-bar,.kh-nav,.kh-zoom-hint,.kh-modal-bg,.kh-preview-bg,.kh-toast,.kh-print-btn,.kh-day-btns,.kh-print-toolbar{display:none !important}
-  .kh-print-tab{height:auto !important;overflow:visible !important;display:block !important}
-  .kh-pt-canvas{display:block !important;overflow:visible !important;padding:0 !important;background:#fff !important}
-  .kh-pt-paper{max-width:none !important;width:100% !important;aspect-ratio:auto !important;height:calc(210mm - 8mm) !important;padding:3mm 4mm !important;box-shadow:none !important}
-  .kh-pt-subtitle{border:none !important;padding:0 !important;background:transparent !important;margin-bottom:2px}
-  .kh-pt-legend{gap:8px;margin-bottom:4px}
-  .kh-pt-gantt{overflow:visible}
-  .kh-pt-bar{box-shadow:none}
-  .kh-pt-memo{background:transparent !important;border:none !important;box-shadow:none !important}
-  .kh-pt-memo-toolbar{display:none !important}
-  .kh-pt-memo-body{padding:0 !important}
+html,body,#root{height:100%;width:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:13px;line-height:1.5;
+  font-feature-settings:"palt";-webkit-font-smoothing:antialiased;overflow:hidden}
+.mono{font-family:var(--font-mono);font-feature-settings:"tnum"}
+.num{font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:6px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:var(--text-4)}
 
-  /* 28日（4週）*/
-  .kh-pt-paper[data-weeks="4"] .kh-pt-title{font-size:14px;letter-spacing:1px;margin-bottom:2px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-subtitle{font-size:8px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-legend-item{font-size:8px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-legend-dot{width:9px;height:9px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-dow-cell{padding:2px 1px;font-size:9px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-date-cell{padding:1px 2px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-date-num{font-size:11px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-bar-name{font-size:8px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-bar-person{font-size:7px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-bar-memo{font-size:7px}
-  .kh-pt-paper[data-weeks="4"] .kh-pt-memo{font-size:7px}
+button{font-family:inherit}
+input,textarea,select{font-family:inherit}
 
-  /* 14日（2週）*/
-  .kh-pt-paper[data-weeks="2"] .kh-pt-title{font-size:18px;letter-spacing:2px;margin-bottom:3px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-subtitle{font-size:10px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-legend-item{font-size:10px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-legend-dot{width:11px;height:11px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-dow-cell{padding:5px 2px;font-size:12px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-date-cell{padding:3px 4px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-date-num{font-size:15px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-bar-name{font-size:11px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-bar-person{font-size:9px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-bar-memo{font-size:9px}
-  .kh-pt-paper[data-weeks="2"] .kh-pt-memo{font-size:10px}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(31,138,91,.15)}50%{box-shadow:0 0 0 5px rgba(31,138,91,.05)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideInL{from{transform:translateX(-100%)}to{transform:translateX(0)}}
+@keyframes slideInR{from{transform:translateX(100%)}to{transform:translateX(0)}}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 
-  /* 7日（1週）*/
-  .kh-pt-paper[data-weeks="1"] .kh-pt-title{font-size:22px;letter-spacing:3px;margin-bottom:4px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-subtitle{font-size:12px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-legend-item{font-size:12px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-legend-dot{width:14px;height:14px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-dow-cell{padding:8px 2px;font-size:16px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-date-cell{padding:5px 6px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-date-num{font-size:20px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-bar-name{font-size:14px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-bar-person{font-size:11px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-bar-memo{font-size:11px}
-  .kh-pt-paper[data-weeks="1"] .kh-pt-memo{font-size:12px}
+/* Toast */
+.kh-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#D42020;color:#fff;
+  padding:10px 20px;border-radius:12px;font-size:13px;font-weight:600;z-index:999;
+  box-shadow:0 4px 16px rgba(0,0,0,.3);animation:fadeIn .2s ease;font-family:var(--font-jp)}
+
+/* Print preview & print */
+body.kh-print-preview{overflow:auto !important;background:#ddd !important}
+body.kh-print-preview #root{background:#fff;padding:20px 28px;max-width:1100px;margin:24px auto;
+  box-shadow:0 10px 40px rgba(0,0,0,.15);min-height:calc(100vh - 48px);height:auto !important}
+body.kh-print-preview header,
+body.kh-print-preview .subheader,
+body.kh-print-preview aside,
+body.kh-print-preview nav[data-tabbar],
+body.kh-print-preview [data-print="hide"]{display:none !important}
+body.kh-print-preview .print-only{display:block !important}
+body.kh-print-preview #root > div{display:block !important;height:auto !important;width:auto !important;overflow:visible !important}
+body.kh-print-preview main{overflow:visible !important;height:auto !important;position:static !important;padding:0 !important}
+body.kh-print-preview main *{overflow:visible !important;max-height:none !important}
+.print-only{display:none}
+
+/* ── Calendar print scaling: row heights grow as week-count shrinks ── */
+body.kh-print-preview [data-weeks]{height:auto !important;overflow:visible !important}
+body.kh-print-preview [data-weeks] > div{flex:none !important;height:auto !important}
+body.kh-print-preview [data-weeks="1"] > div{grid-template-rows:auto 600px !important}
+body.kh-print-preview [data-weeks="2"] > div{grid-template-rows:auto 300px 300px !important}
+body.kh-print-preview [data-weeks="3"] > div{grid-template-rows:auto repeat(3,200px) !important}
+body.kh-print-preview [data-weeks="4"] > div{grid-template-rows:auto repeat(4,150px) !important}
+body.kh-print-preview [data-weeks="5"] > div{grid-template-rows:auto repeat(5,120px) !important}
+
+@media print{
+  @page{margin:10mm;size:A4 landscape}
+  html,body,#root{height:auto !important;width:auto !important;overflow:visible !important;
+    background:#fff !important;color:#000 !important;
+    -webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+  header,.subheader,aside,nav[data-tabbar],[data-print="hide"],.preview-bar{display:none !important}
+  .print-only{display:block !important}
+  #root > div{display:block !important;height:auto !important;overflow:visible !important}
+  main{overflow:visible !important;height:auto !important;position:static !important;padding:0 !important}
+  main *{overflow:visible !important;max-height:none !important}
+  *{text-shadow:none !important;animation:none !important}
+  /* Calendar: explicit row heights scale with week count so fewer weeks = larger cells */
+  [data-weeks]{height:auto !important;overflow:visible !important}
+  [data-weeks] > div{flex:none !important;height:auto !important}
+  [data-weeks="1"] > div{grid-template-rows:auto 155mm !important}
+  [data-weeks="2"] > div{grid-template-rows:auto 77mm 77mm !important}
+  [data-weeks="3"] > div{grid-template-rows:auto repeat(3,51mm) !important}
+  [data-weeks="4"] > div{grid-template-rows:auto repeat(4,38mm) !important}
+  [data-weeks="5"] > div{grid-template-rows:auto repeat(5,30mm) !important}
 }
 `
 
 // ────────────────────────────────────────────────
-// DayView
+// Toast hook
 // ────────────────────────────────────────────────
-const DayView = memo(function DayView({ which, filteredTasks, toggleDone, setPreviewTask, now, todayKey }) {
-  const targetDate = which === "tomorrow" ? addDays(now, 1) : now
-  const targetKey  = toKey(targetDate)
-  const month = targetDate.getMonth() + 1
-  const date  = targetDate.getDate()
-  const dow   = DAYS_JA[targetDate.getDay()]
-  const label = which === "tomorrow" ? "明日の作業" : "本日の作業"
+function useToast() {
+  const [msg, setMsg] = useState(null)
+  const tRef = useRef(null)
+  const show = useCallback((m)=> {
+    setMsg(m)
+    if(tRef.current) clearTimeout(tRef.current)
+    tRef.current = setTimeout(()=>setMsg(null), 2400)
+  }, [])
+  return [msg, show]
+}
 
-  const dayTasks = filteredTasks.filter(t => {
-    const s = parseKey(t.start_key), e = parseKey(t.end_key), target = parseKey(targetKey)
-    return target >= s && target <= e
-  })
-  const doneCount = dayTasks.filter(t => t.done).length
+// ────────────────────────────────────────────────
+// Breakpoint hook
+// ────────────────────────────────────────────────
+function useBreakpoint() {
+  const getBp = (w) => w < 768 ? 'mobile' : w < 1100 ? 'tablet' : 'desktop'
+  const [bp, setBp] = useState(()=> getBp(window.innerWidth))
+  useEffect(()=>{
+    const update = ()=> setBp(getBp(window.innerWidth))
+    window.addEventListener('resize', update)
+    return ()=> window.removeEventListener('resize', update)
+  }, [])
+  return bp
+}
 
+// ────────────────────────────────────────────────
+// Icon component (SVG inline)
+// ────────────────────────────────────────────────
+function Icon({ name, size=16 }) {
+  const paths = {
+    gantt:    <><path d="M3 5h7M3 9h11M3 13h5M3 17h9" strokeWidth="1.6" strokeLinecap="round"/></>,
+    calendar: <><rect x="3" y="4.5" width="14" height="13" rx="1.5" strokeWidth="1.4"/><path d="M3 8h14M7 3v3M13 3v3" strokeWidth="1.4" strokeLinecap="round"/></>,
+    list:     <><circle cx="4.5" cy="6"  r="1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="14" r="1" fill="currentColor" stroke="none"/><path d="M8 6h9M8 10h9M8 14h9" strokeWidth="1.4" strokeLinecap="round"/></>,
+    agenda:   <><path d="M5 4h10M5 8h10M5 12h6M5 16h8" strokeWidth="1.5" strokeLinecap="round"/><circle cx="3" cy="4" r=".8" fill="currentColor" stroke="none"/><circle cx="3" cy="8" r=".8" fill="currentColor" stroke="none"/><circle cx="3" cy="12" r=".8" fill="currentColor" stroke="none"/><circle cx="3" cy="16" r=".8" fill="currentColor" stroke="none"/></>,
+    print:    <><path d="M6 5V3h8v2M5 7h10a1 1 0 0 1 1 1v5h-2v3H6v-3H4V8a1 1 0 0 1 1-1Z" strokeWidth="1.4" strokeLinejoin="round"/></>,
+    plus:     <><path d="M10 4v12M4 10h12" strokeWidth="1.6" strokeLinecap="round"/></>,
+    search:   <><circle cx="9" cy="9" r="5.5" strokeWidth="1.5"/><path d="m13 13 3.5 3.5" strokeWidth="1.5" strokeLinecap="round"/></>,
+    chevL:    <><path d="m12 4-5 6 5 6" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></>,
+    chevR:    <><path d="m8 4 5 6-5 6" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></>,
+    menu:     <><path d="M3 6h14M3 10h14M3 14h14" strokeWidth="1.6" strokeLinecap="round"/></>,
+    close:    <><path d="m5 5 10 10M15 5 5 15" strokeWidth="1.6" strokeLinecap="round"/></>,
+    check:    <><path d="m4 10 4 4 8-8" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></>,
+    sun:      <><circle cx="10" cy="10" r="3.5" strokeWidth="1.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M4.2 15.8l1.4-1.4M14.4 5.6l1.4-1.4" strokeWidth="1.4" strokeLinecap="round"/></>,
+    moon:     <><path d="M16 11a6 6 0 1 1-7-7 5 5 0 0 0 7 7Z" strokeWidth="1.5" strokeLinejoin="round"/></>,
+    trash:    <><path d="M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"/></>,
+    edit:     <><path d="M4 14v2h2l9-9-2-2-9 9Z" strokeWidth="1.4" strokeLinejoin="round"/></>,
+  }
   return (
-    <div className="kh-day-view">
-      <div className="kh-dv-header">
-        <span>{label}</span>
-        <span className="kh-dv-badge">{month}月{date}日（{dow}）</span>
-        <span style={{fontSize:11,color:"#888",fontWeight:600}}>{dayTasks.length}件</span>
-      </div>
-      {dayTasks.length === 0 ? (
-        <div className="kh-dv-empty">📋 {label}はありません<br/>
-          <span style={{fontSize:12,color:"#BBB",marginTop:6,display:"block"}}>工程表タブから追加できます</span>
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" style={{flexShrink:0}}>
+      {paths[name]}
+    </svg>
+  )
+}
+
+// ────────────────────────────────────────────────
+// IconButton
+// ────────────────────────────────────────────────
+function IconButton({ icon, label, onClick, primary, active, size=32, title }) {
+  return (
+    <button onClick={onClick} title={title||label} aria-label={title||label}
+      style={{
+        display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,
+        height:size,minWidth:size,padding:label?'0 12px':0,
+        background:primary?'var(--accent)':(active?'var(--surface-3)':'transparent'),
+        color:primary?'#fff':(active?'var(--text)':'var(--text-2)'),
+        border:primary?'1px solid var(--accent-2)':'1px solid transparent',
+        borderRadius:7,cursor:'pointer',fontSize:12,fontWeight:500,fontFamily:'var(--font-jp)',
+        transition:'all .12s ease',whiteSpace:'nowrap',
+      }}
+      onMouseEnter={e=>{if(!primary&&!active)e.currentTarget.style.background='var(--surface-3)'}}
+      onMouseLeave={e=>{if(!primary&&!active)e.currentTarget.style.background='transparent'}}
+    >
+      {icon && <Icon name={icon} size={15}/>}
+      {label}
+    </button>
+  )
+}
+
+// ────────────────────────────────────────────────
+// Header
+// ────────────────────────────────────────────────
+function Header({ bp, view, setView, search, setSearch, onOpenDrawer, onAdd, onPrint, onToggleTheme, theme, viewOptions, searchExpanded, setSearchExpanded }) {
+  return (
+    <header style={{
+      gridArea:'header',display:'flex',alignItems:'center',
+      padding:bp==='mobile'?'0 12px':'0 20px',
+      background:'var(--surface)',borderBottom:'1px solid var(--border)',
+      gap:bp==='mobile'?8:14,height:bp==='mobile'?52:52,flexShrink:0,
+    }}>
+      {bp!=='desktop' && (
+        <IconButton icon="menu" onClick={onOpenDrawer} title="メニュー"/>
+      )}
+
+      {!searchExpanded && (
+        <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0,flex:1}}>
+          <div style={{width:28,height:28,borderRadius:6,background:'var(--text)',color:'var(--surface)',
+            display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,
+            fontFamily:'var(--font-jp)',flexShrink:0}}>工</div>
+          <div style={{display:'flex',flexDirection:'column',gap:1,minWidth:0,flex:1}}>
+            <span style={{fontSize:bp==='mobile'?13:13.5,fontWeight:600,fontFamily:'var(--font-jp)',
+              whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>工程表</span>
+            <span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:10.5,color:'#1F8A5B'}}>
+              <span style={{width:6,height:6,borderRadius:'50%',background:'#1F8A5B',
+                boxShadow:'0 0 0 3px rgba(31,138,91,.15)',animation:'pulse 2s infinite'}}/>
+              LIVE
+            </span>
+          </div>
         </div>
-      ) : (
+      )}
+
+      {searchExpanded && (
+        <div style={{flex:1,display:'flex',alignItems:'center',gap:6}}>
+          <Icon name="search" size={16}/>
+          <input autoFocus value={search} onChange={e=>setSearch(e.target.value)} placeholder="検索"
+            style={{flex:1,height:32,padding:'0 8px',background:'transparent',border:'none',outline:'none',
+              fontSize:14,color:'var(--text)',fontFamily:'var(--font-jp)'}}/>
+          <IconButton icon="close" onClick={()=>{setSearch('');setSearchExpanded(false)}}/>
+        </div>
+      )}
+
+      {!searchExpanded && bp==='desktop' && (
+        <div style={{position:'relative',width:280}}>
+          <div style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',color:'var(--text-3)',pointerEvents:'none'}}>
+            <Icon name="search" size={14}/>
+          </div>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="タスク・担当・工種で検索"
+            style={{width:'100%',height:32,padding:'0 12px 0 32px',background:'var(--surface-2)',
+              border:'1px solid var(--border)',borderRadius:6,fontSize:12,color:'var(--text)',
+              fontFamily:'var(--font-jp)',outline:'none'}}
+            onFocus={e=>e.currentTarget.style.borderColor='var(--accent)'}
+            onBlur={e=>e.currentTarget.style.borderColor='var(--border)'}/>
+        </div>
+      )}
+
+      {!searchExpanded && bp!=='desktop' && (
+        <IconButton icon="search" onClick={()=>setSearchExpanded(true)}/>
+      )}
+
+      {!searchExpanded && (bp==='desktop'||bp==='tablet') && (
+        <ViewSwitcher view={view} setView={setView} options={viewOptions} showLabel={bp==='desktop'}/>
+      )}
+
+      {!searchExpanded && (
         <>
-          {dayTasks.map(t => {
-            const c = COLORS.find(x => x.id === t.color) || COLORS[0]
-            const days = diffDays(parseKey(t.start_key), parseKey(t.end_key))
-            return (
-              <div key={t.id} className={`kh-card${t.done ? " done" : ""}`}>
-                <div className="kh-card-accent" style={{background:c.bg}}/>
-                <div className="kh-card-body" onClick={() => setPreviewTask(t)}>
-                  <div className="kh-card-title">{t.text}</div>
-                  <div className="kh-card-meta">
-                    <span>🏗 {c.label}</span>
-                    <span>🏢 {t.assignee || "未設定"}</span>
-                    {days > 0 && <span>📆 {days + 1}日間</span>}
-                  </div>
-                  {t.memo && (
-                    <div className="kh-card-memo" style={{borderLeftColor: c.bg}}>
-                      📝 {t.memo}
-                    </div>
-                  )}
-                </div>
-                <div className="kh-card-right">
-                  <button className={`kh-card-done-btn${t.done ? " checked" : ""}`}
-                    onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
-                    aria-label={t.done ? "未完了に戻す" : "完了にする"}>✓</button>
-                </div>
-              </div>
-            )
-          })}
-          {doneCount > 0 && (
-            <div className="kh-dv-summary">✅ {doneCount}件完了 / {dayTasks.length}件中</div>
-          )}
+          <IconButton icon={theme==='dark'?'sun':'moon'} onClick={onToggleTheme} title={theme==='dark'?'ライトモード':'ダークモード'}/>
+          {bp==='desktop' && <div style={{width:1,height:24,background:'var(--border)'}}/>}
+          <IconButton icon="print" label={bp==='desktop'?'印刷':null} onClick={onPrint}/>
+          <IconButton icon="plus" label={bp==='desktop'?'タスク追加':null} primary onClick={onAdd}/>
         </>
       )}
+    </header>
+  )
+}
+
+// ────────────────────────────────────────────────
+// ViewSwitcher
+// ────────────────────────────────────────────────
+function ViewSwitcher({ view, setView, options, showLabel }) {
+  return (
+    <div style={{display:'flex',padding:2,background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:8}}>
+      {options.map(v=>(
+        <button key={v.id} onClick={()=>setView(v.id)} title={v.label}
+          style={{
+            display:'inline-flex',alignItems:'center',gap:5,
+            padding:showLabel?'4px 10px':0,width:showLabel?'auto':30,height:26,
+            background:view===v.id?'var(--surface)':'transparent',
+            color:view===v.id?'var(--text)':'var(--text-3)',
+            border:'none',boxShadow:view===v.id?'var(--shadow-sm)':'none',
+            borderRadius:6,cursor:'pointer',fontSize:12,fontWeight:500,
+            fontFamily:'var(--font-jp)',transition:'all .12s ease',justifyContent:'center',
+          }}>
+          <Icon name={v.icon} size={14}/>
+          {showLabel && v.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────
+// Sidebar content
+// ────────────────────────────────────────────────
+function SidebarContent({ activeCats, setActiveCats, tasks, onClose }) {
+  const stats = useMemo(()=>{
+    const total = tasks.length
+    const done = tasks.filter(t=>t.done).length
+    const upcoming = total - done
+    return { total, done, upcoming }
+  }, [tasks])
+
+  const toggleCat = id => setActiveCats(s => s.includes(id) ? s.filter(c=>c!==id) : [...s,id])
+  const catCounts = useMemo(()=>{
+    const m={}
+    tasks.forEach(t=>{ m[t.color]=(m[t.color]||0)+1 })
+    return m
+  }, [tasks])
+
+  return (
+    <>
+      <div style={{padding:'14px 16px 12px',borderBottom:'1px solid var(--border)'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+          <div style={{fontSize:10,fontWeight:700,letterSpacing:'.08em',textTransform:'uppercase',color:'var(--text-3)'}}>進捗</div>
+          {onClose && <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:'var(--text-3)',width:24,height:24,display:'inline-flex',alignItems:'center',justifyContent:'center',borderRadius:5}}><Icon name="close" size={14}/></button>}
+        </div>
+        <div style={{display:'flex',alignItems:'baseline',gap:4,marginBottom:8}}>
+          <span className="mono num" style={{fontSize:26,fontWeight:600,lineHeight:1,color:'var(--text)'}}>{Math.round((stats.done/Math.max(1,stats.total))*100)}</span>
+          <span style={{fontSize:12,color:'var(--text-3)'}}>%</span>
+          <span style={{marginLeft:'auto',fontSize:10.5,color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>{stats.done}/{stats.total}</span>
+        </div>
+        <div style={{display:'flex',height:5,borderRadius:3,overflow:'hidden',background:'var(--surface-3)'}}>
+          <div style={{width:`${(stats.done/Math.max(1,stats.total))*100}%`,background:'#1F8A5B'}}/>
+        </div>
+      </div>
+
+      <div style={{padding:'12px 16px 14px',flex:1,overflowY:'auto',minHeight:0}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+          <div style={{fontSize:10,fontWeight:700,letterSpacing:'.08em',textTransform:'uppercase',color:'var(--text-3)'}}>工種</div>
+          <button onClick={()=>setActiveCats(activeCats.length?[]:CATEGORIES.map(c=>c.id))}
+            style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-3)',fontSize:10.5,fontFamily:'var(--font-jp)'}}>
+            {activeCats.length?'クリア':'全選択'}
+          </button>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:1}}>
+          {CATEGORIES.map(c=>{
+            const active = activeCats.length===0 || activeCats.includes(c.id)
+            return (
+              <button key={c.id} onClick={()=>toggleCat(c.id)}
+                style={{display:'flex',alignItems:'center',gap:8,padding:'6px 6px',margin:'0 -6px',
+                  background:'transparent',border:'none',borderRadius:5,cursor:'pointer',textAlign:'left',
+                  opacity:active?1:.4,transition:'all .1s ease'}}>
+                <span style={{width:10,height:10,borderRadius:3,background:c.color,flexShrink:0,boxShadow:'inset 0 0 0 1px rgba(0,0,0,.06)'}}/>
+                <span style={{fontSize:12,fontFamily:'var(--font-jp)',fontWeight:500,color:'var(--text)'}}>{c.label}</span>
+                <span style={{fontSize:10,color:'var(--text-4)',fontFamily:'var(--font-jp)'}}>{c.en}</span>
+                <span className="mono num" style={{marginLeft:'auto',fontSize:10.5,color:'var(--text-3)'}}>{catCounts[c.id]||0}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function Sidebar(props) {
+  return (
+    <aside style={{gridArea:'sidebar',borderRight:'1px solid var(--border)',background:'var(--surface)',
+      overflowY:'auto',display:'flex',flexDirection:'column'}}>
+      <SidebarContent {...props}/>
+    </aside>
+  )
+}
+
+function SidebarDrawer({ open, onClose, ...props }) {
+  if(!open) return null
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:80,display:'flex',animation:'fadeIn .15s ease'}}>
+      <div onClick={onClose} style={{position:'absolute',inset:0,background:'rgba(20,18,12,.4)',backdropFilter:'blur(2px)'}}/>
+      <div style={{position:'relative',width:'min(320px,86vw)',background:'var(--surface)',
+        boxShadow:'var(--shadow-lg)',display:'flex',flexDirection:'column',overflowY:'auto',
+        animation:'slideInL .2s ease'}}>
+        <SidebarContent {...props} onClose={onClose}/>
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────
+// SubHeader (date controls)
+// ────────────────────────────────────────────────
+function SubHeader({ rangeStart, setRangeStart, rangeDays, setRangeDays, bp }) {
+  const start = parseKey(rangeStart)
+  const end = addDays(start, rangeDays-1)
+  const shift = dir => setRangeStart(toKey(addDays(start, dir*7)))
+  const goToday = () => setRangeStart(toKey(addDays(new Date(), -3)))
+  const dayOptions = [7,14,28]
+
+  return (
+    <div data-print="hide" className="subheader" style={{
+      gridArea:'subheader',display:'flex',alignItems:'center',
+      padding:bp==='mobile'?'0 12px':'0 20px',gap:bp==='mobile'?8:12,
+      background:'var(--surface)',borderBottom:'1px solid var(--border)',
+      height:bp==='mobile'?44:44,flexShrink:0,overflowX:'auto',
+    }}>
+      <div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+        <button onClick={()=>shift(-1)} aria-label="前週"
+          style={{width:30,height:30,padding:0,background:'transparent',border:'1px solid var(--border)',
+            borderRadius:6,cursor:'pointer',color:'var(--text-2)',display:'inline-flex',
+            alignItems:'center',justifyContent:'center'}}>
+          <Icon name="chevL" size={14}/>
+        </button>
+        <button onClick={goToday}
+          style={{height:30,padding:'0 10px',background:'var(--surface)',border:'1px solid var(--border)',
+            borderRadius:6,cursor:'pointer',fontSize:11.5,fontWeight:500,color:'var(--text-2)',
+            fontFamily:'var(--font-jp)'}}>今日</button>
+        <button onClick={()=>shift(1)} aria-label="次週"
+          style={{width:30,height:30,padding:0,background:'transparent',border:'1px solid var(--border)',
+            borderRadius:6,cursor:'pointer',color:'var(--text-2)',display:'inline-flex',
+            alignItems:'center',justifyContent:'center'}}>
+          <Icon name="chevR" size={14}/>
+        </button>
+      </div>
+
+      <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+        <span className="mono" style={{fontSize:bp==='mobile'?13:14,fontWeight:500,color:'var(--text)'}}>{fmtMD(start)}</span>
+        <span style={{color:'var(--text-4)'}}>—</span>
+        <span className="mono" style={{fontSize:bp==='mobile'?13:14,fontWeight:500,color:'var(--text)'}}>{fmtMD(end)}</span>
+        {bp!=='mobile' && (
+          <span style={{fontSize:11,color:'var(--text-3)',fontFamily:'var(--font-jp)',marginLeft:4}}>{start.getFullYear()}年</span>
+        )}
+      </div>
+
+      <div style={{width:1,height:20,background:'var(--border)',margin:'0 2px',flexShrink:0}}/>
+
+      <div style={{display:'flex',padding:2,background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:6,flexShrink:0}}>
+        {dayOptions.map(d=>(
+          <button key={d} onClick={()=>setRangeDays(d)}
+            style={{padding:'2px 10px',height:24,
+              background:rangeDays===d?'var(--accent)':'transparent',
+              color:rangeDays===d?'#fff':'var(--text-3)',
+              border:'none',borderRadius:4,cursor:'pointer',fontSize:11.5,fontWeight:500,
+              fontFamily:'var(--font-jp)',transition:'all .12s ease'}}>{d}日</button>
+        ))}
+      </div>
+
+      <div style={{flex:1}}/>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────
+// BottomTabBar (mobile)
+// ────────────────────────────────────────────────
+function BottomTabBar({ view, setView, options }) {
+  return (
+    <nav data-tabbar style={{
+      gridArea:'tabbar',display:'flex',background:'var(--surface)',
+      borderTop:'1px solid var(--border)',height:56,
+      paddingBottom:'env(safe-area-inset-bottom,0px)',flexShrink:0,
+    }}>
+      {options.map(v=>{
+        const active = view===v.id
+        return (
+          <button key={v.id} onClick={()=>setView(v.id)}
+            style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+              gap:3,background:'transparent',border:'none',cursor:'pointer',
+              color:active?'var(--accent-2)':'var(--text-3)',padding:'6px 0',
+              transition:'color .12s ease'}}>
+            <Icon name={v.icon} size={18}/>
+            <span style={{fontSize:10,fontWeight:600,fontFamily:'var(--font-jp)'}}>{v.label}</span>
+          </button>
+        )
+      })}
+    </nav>
+  )
+}
+
+// ────────────────────────────────────────────────
+// Gantt View (task-row layout with label column)
+// ────────────────────────────────────────────────
+const GanttView = memo(function GanttView({ tasks, rangeStart, rangeDays, bp, onSelect, resizeTask, toggleDone }) {
+  const base = parseKey(rangeStart)
+  const colDates = useMemo(()=> Array.from({length:rangeDays},(_,i)=>addDays(base,i)), [rangeStart,rangeDays])
+  const chartRef = useRef(null)
+  const [chartW, setChartW] = useState(0)
+  const [pendingResize, setPendingResize] = useState(null)
+  const dragRef = useRef(null)
+
+  useEffect(()=>{
+    if(!chartRef.current) return
+    const ro = new ResizeObserver(entries=>{
+      for(const e of entries) setChartW(e.contentRect.width)
+    })
+    ro.observe(chartRef.current)
+    return ()=> ro.disconnect()
+  }, [])
+
+  const LABEL_W = bp==='mobile'? 130 : (bp==='tablet'? 200 : 240)
+  const ROW_H   = bp==='mobile'? 36 : 40
+  const GROUP_H = bp==='mobile'? 30 : 32
+  const minDayW = bp==='mobile'? 38 : 44
+  const dayW = chartW > 0 ? Math.max(minDayW, chartW / rangeDays) : minDayW
+  const totalChartW = dayW * rangeDays
+  const today = new Date(); today.setHours(0,0,0,0)
+  const todayCol = diffDays(base, today)
+
+  // Group tasks by category, sorted by start date within group
+  const grouped = useMemo(()=>{
+    const map = {}
+    CATEGORIES.forEach(c=>{ map[c.id]=[] })
+    tasks.forEach(t=>{ if(map[t.color]) map[t.color].push(t) })
+    Object.values(map).forEach(arr => arr.sort((a,b)=> a.start_key.localeCompare(b.start_key)))
+    return CATEGORIES.map(c=>({cat:c, tasks:map[c.id]})).filter(g=>g.tasks.length>0)
+  }, [tasks])
+
+  // Apply pending resize
+  const displayTask = useCallback(t => {
+    if(pendingResize && pendingResize.id===t.id){
+      return {...t,
+        start_key:pendingResize.startKey, end_key:pendingResize.endKey,
+        start_frac:pendingResize.startFrac, end_frac:pendingResize.endFrac}
+    }
+    return t
+  }, [pendingResize])
+
+  const startResize = useCallback((e, task, edge)=>{
+    e.stopPropagation(); e.preventDefault()
+    const halfW = dayW / 2
+    const startX = e.touches ? e.touches[0].clientX : e.clientX
+    const origStartHalf = startHalf(task, base)
+    const origEndHalf   = endHalf(task, base)
+    dragRef.current = { edge, origTask: task, halfW, startX, origStartHalf, origEndHalf }
+
+    const onMove = ev => {
+      const d = dragRef.current; if(!d) return
+      const x = ev.touches ? ev.touches[0].clientX : ev.clientX
+      const dx = x - d.startX
+      const deltaHalf = Math.round(dx / d.halfW)
+      if(d.edge==='left'){
+        const newStartHalf = Math.min(d.origStartHalf + deltaHalf, d.origEndHalf - 1)
+        const {day:sDay, frac:sFrac} = halfToDayFrac(newStartHalf)
+        d.startKey = toKey(addDays(base, sDay))
+        d.startFrac = sFrac
+        d.endKey = d.origTask.end_key
+        d.endFrac = d.origTask.end_frac || 0
+      } else {
+        const newEndHalf = Math.max(d.origEndHalf + deltaHalf, d.origStartHalf + 1)
+        const {day:eDay, frac:eFrac} = endHalfToDayFrac(newEndHalf)
+        d.startKey = d.origTask.start_key
+        d.startFrac = d.origTask.start_frac || 0
+        d.endKey = toKey(addDays(base, eDay))
+        d.endFrac = eFrac
+      }
+      setPendingResize({ id: d.origTask.id, startKey:d.startKey, endKey:d.endKey, startFrac:d.startFrac, endFrac:d.endFrac })
+    }
+    const onUp = () => {
+      const d = dragRef.current
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', onUp)
+      if(d){
+        const changed = d.startKey !== d.origTask.start_key
+          || d.endKey   !== d.origTask.end_key
+          || (d.startFrac||0) !== (d.origTask.start_frac||0)
+          || (d.endFrac||0)   !== (d.origTask.end_frac||0)
+        if(changed){
+          resizeTask(d.origTask.id, d.startKey, d.endKey, d.startFrac, d.endFrac)
+        }
+      }
+      dragRef.current = null
+      setPendingResize(null)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchmove', onMove, {passive:false})
+    window.addEventListener('touchend', onUp)
+  }, [dayW, base, resizeTask])
+
+  // Flatten rows with group headers for unified scrolling
+  const flatRows = useMemo(()=>{
+    const rows = []
+    grouped.forEach(g => {
+      rows.push({type:'group', cat:g.cat, count:g.tasks.length})
+      g.tasks.forEach(t => rows.push({type:'task', task:t, cat:g.cat}))
+    })
+    return rows
+  }, [grouped])
+
+  // Calculate dynamic row stretch to fill viewport
+  // We don't want to artificially stretch tasks; use min content height
+  const taskRowCount = flatRows.filter(r => r.type==='task').length
+
+  const DateHeader = () => (
+    <div style={{display:'flex',background:'var(--surface)',borderBottom:'1px solid var(--border)',
+      height:bp==='mobile'?44:48,flexShrink:0,position:'sticky',top:0,zIndex:20}}>
+      <div style={{width:LABEL_W,padding:'0 14px',borderRight:'1px solid var(--border)',
+        display:'flex',alignItems:'center',background:'var(--surface)'}}>
+        <span style={{fontSize:10,fontWeight:600,letterSpacing:'.08em',textTransform:'uppercase',
+          color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>タスク</span>
+        <span className="mono num" style={{marginLeft:'auto',fontSize:11,color:'var(--text-3)'}}>{taskRowCount}</span>
+      </div>
+      <div style={{flex:1,display:'grid',gridTemplateColumns:`repeat(${rangeDays},1fr)`,minWidth:totalChartW}}>
+        {colDates.map((d,i)=>{
+          const isT = sameDay(d, today)
+          const we = isWeekend(d)
+          return (
+            <div key={i} style={{
+              borderRight:'1px solid var(--border)',padding:'4px 2px',
+              background:isT?'var(--today)':(we?(d.getDay()===0?'rgba(177,72,72,.05)':'rgba(47,93,160,.05)'):'transparent'),
+              display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+            }}>
+              <span style={{fontSize:9,fontWeight:600,letterSpacing:'.04em',
+                color:d.getDay()===0?'var(--sun)':(d.getDay()===6?'var(--sat)':'var(--text-3)'),
+                fontFamily:'var(--font-jp)'}}>{DAYS_JA[d.getDay()]}</span>
+              <span className="mono num" style={{fontSize:bp==='mobile'?13:14,fontWeight:600,lineHeight:1.1,
+                color:d.getDay()===0?'var(--sun)':(d.getDay()===6?'var(--sat)':(isT?'var(--accent-2)':'var(--text)'))}}>{d.getDate()}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+
+  return (
+    <div style={{height:'100%',width:'100%',display:'flex',flexDirection:'column',
+      background:'var(--bg)',overflow:'hidden'}}>
+      <div style={{flex:1,overflow:'auto',background:'var(--surface)'}}>
+        <DateHeader/>
+        {tasks.length===0 ? (
+          <div style={{padding:'80px 20px',textAlign:'center',color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>
+            タスクがありません
+          </div>
+        ) : (
+          <div style={{position:'relative'}}>
+            {flatRows.map((row, idx) => {
+              if(row.type === 'group'){
+                return (
+                  <div key={`g-${row.cat.id}`} style={{
+                    display:'flex',height:GROUP_H,background:'var(--surface-2)',
+                    borderBottom:'1px solid var(--border)',borderTop:idx>0?'1px solid var(--border-2)':'none',
+                    position:'sticky',top:bp==='mobile'?44:48,zIndex:10,
+                  }}>
+                    <div style={{width:LABEL_W,padding:bp==='mobile'?'0 10px':'0 14px',borderRight:'1px solid var(--border)',
+                      display:'flex',alignItems:'center',gap:7,background:'var(--surface-2)',
+                      whiteSpace:'nowrap',overflow:'hidden'}}>
+                      <span style={{width:10,height:10,borderRadius:2,background:row.cat.color,flexShrink:0,
+                        boxShadow:'inset 0 0 0 1px rgba(0,0,0,.06)'}}/>
+                      <span style={{fontSize:12,fontWeight:700,color:'var(--text)',fontFamily:'var(--font-jp)',flexShrink:0}}>{row.cat.label}</span>
+                      {bp!=='mobile' && <span style={{fontSize:10,color:'var(--text-4)',fontFamily:'var(--font-jp)',overflow:'hidden',textOverflow:'ellipsis'}}>{row.cat.en}</span>}
+                      <span className="mono num" style={{marginLeft:'auto',fontSize:10.5,color:'var(--text-3)',fontWeight:600,flexShrink:0}}>{row.count}</span>
+                    </div>
+                    <div style={{flex:1,minWidth:totalChartW}}/>
+                  </div>
+                )
+              }
+              const t = displayTask(row.task)
+              const cat = row.cat
+              const sCol = diffDays(base, parseKey(t.start_key))
+              const eCol = diffDays(base, parseKey(t.end_key))
+              const sFrac = t.start_frac >= 0.5 ? 0.5 : 0
+              const eFrac = t.end_frac >= 0.5 ? 0.5 : 0
+              const visible = eCol >= 0 && sCol < rangeDays
+              const startPos = sCol + sFrac
+              const endPos   = eCol + 1 - eFrac
+              const left  = Math.max(0, startPos) * dayW
+              const right = Math.min(rangeDays, endPos) * dayW
+              const width = Math.max(dayW*0.25, right - left)
+              const hasMemo = !!(t.memo && t.memo.trim())
+              const MEMO_H = bp==='mobile' ? 14 : 15
+              const thisRowH = hasMemo ? ROW_H + MEMO_H : ROW_H
+              const BAR_H = ROW_H - 14
+              return (
+                <div key={`t-${t.id}`} style={{display:'flex',height:thisRowH,borderBottom:'1px solid var(--border)',
+                  transition:'background .1s ease'}}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                  {/* Label column */}
+                  <div onClick={()=>onSelect(t)} style={{
+                    width:LABEL_W,padding:bp==='mobile'?'0 8px 0 10px':'0 10px 0 14px',borderRight:'1px solid var(--border)',
+                    display:'flex',alignItems:'center',gap:7,cursor:'pointer',
+                    background:'inherit'}}>
+                    <button onClick={e=>{e.stopPropagation();toggleDone(t.id,!t.done)}}
+                      style={{width:18,height:18,borderRadius:'50%',
+                        border:`2px solid ${t.done?'#1F8A5B':'var(--text-4)'}`,
+                        background:t.done?'#1F8A5B':'transparent',cursor:'pointer',padding:0,
+                        display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}}>
+                      {t.done && <Icon name="check" size={10}/>}
+                    </button>
+                    <span style={{width:3,height:18,borderRadius:2,background:cat.color,flexShrink:0}}/>
+                    <div style={{minWidth:0,flex:1,display:'flex',flexDirection:'column',gap:1}}>
+                      <span style={{fontSize:bp==='mobile'?12:12.5,fontWeight:600,fontFamily:'var(--font-jp)',
+                        color:'var(--text)',textDecoration:t.done?'line-through':'none',
+                        opacity:t.done?.55:1,
+                        overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',lineHeight:1.25}}>{t.text}</span>
+                      {t.assignee && (
+                        <span style={{fontSize:10,color:'var(--text-3)',fontFamily:'var(--font-jp)',
+                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',lineHeight:1.2}}>{t.assignee}</span>
+                      )}
+                    </div>
+                  </div>
+                  {/* Chart cell */}
+                  <div ref={idx===0||chartRef.current==null ? chartRef : null}
+                    style={{flex:1,position:'relative',minWidth:totalChartW,
+                      background:'inherit'}}>
+                    {/* Grid columns */}
+                    <div style={{position:'absolute',inset:0,display:'grid',
+                      gridTemplateColumns:`repeat(${rangeDays},1fr)`,pointerEvents:'none'}}>
+                      {colDates.map((d,i)=>{
+                        const we = isWeekend(d)
+                        const isT = sameDay(d, today)
+                        return (
+                          <div key={i} style={{
+                            borderRight:'1px dashed var(--border)',
+                            background:isT?'rgba(228,161,26,.06)':(we?'rgba(0,0,0,.018)':'transparent'),
+                          }}/>
+                        )
+                      })}
+                    </div>
+                    {/* Today line */}
+                    {todayCol>=0 && todayCol<rangeDays && (
+                      <div style={{position:'absolute',top:0,bottom:0,
+                        left:`${(todayCol+0.5)*dayW}px`,
+                        width:2,background:'var(--accent)',pointerEvents:'none',zIndex:5,opacity:.6}}/>
+                    )}
+                    {/* Bar */}
+                    {visible && (
+                      <div onClick={()=>onSelect(t)} style={{
+                        position:'absolute',left,top:(ROW_H-BAR_H)/2,width,height:BAR_H,
+                        background:cat.color,borderRadius:5,cursor:'pointer',
+                        display:'flex',alignItems:'center',padding:'0 8px',gap:6,
+                        color:'#fff',fontSize:11,fontWeight:600,fontFamily:'var(--font-jp)',
+                        boxShadow:'0 1px 3px rgba(0,0,0,.18)',
+                        opacity:t.done?.45:1,
+                        textDecoration:t.done?'line-through':'none',
+                        whiteSpace:'nowrap',overflow:'hidden'}}>
+                        <div onMouseDown={e=>startResize(e,t,'left')} onTouchStart={e=>startResize(e,t,'left')}
+                          style={{position:'absolute',left:0,top:0,bottom:0,width:bp==='mobile'?18:9,
+                            cursor:'col-resize',touchAction:'none',zIndex:2}}/>
+                        <span style={{overflow:'hidden',textOverflow:'ellipsis',flex:1}}>{t.text}</span>
+                        {width > 120 && t.assignee && (
+                          <span style={{opacity:.85,fontSize:10,fontWeight:500}}>{t.assignee}</span>
+                        )}
+                        <div onMouseDown={e=>startResize(e,t,'right')} onTouchStart={e=>startResize(e,t,'right')}
+                          style={{position:'absolute',right:0,top:0,bottom:0,width:bp==='mobile'?18:9,
+                            cursor:'col-resize',touchAction:'none',zIndex:2}}/>
+                      </div>
+                    )}
+                    {/* Memo (below bar) */}
+                    {hasMemo && visible && (
+                      <div onClick={()=>onSelect(t)} style={{
+                        position:'absolute',left,top:ROW_H-2,
+                        width:Math.max(80, width),
+                        maxWidth:`calc(100% - ${left}px)`,
+                        height:MEMO_H,padding:'0 6px',
+                        fontSize:bp==='mobile'?9.5:10,fontWeight:600,
+                        color:cat.color,fontFamily:'var(--font-jp)',
+                        background:`${cat.color}22`,
+                        borderLeft:`2px solid ${cat.color}`,
+                        borderRadius:'0 3px 3px 0',
+                        display:'flex',alignItems:'center',
+                        whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+                        cursor:'pointer',opacity:t.done?.5:1,lineHeight:1,
+                      }}>
+                        <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{t.memo}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 })
 
 // ────────────────────────────────────────────────
-// ScheduleView
+// Calendar View (week rows × 7 cols, fills viewport)
 // ────────────────────────────────────────────────
-const ScheduleView = memo(function ScheduleView({
-  filteredTasks, viewDays, base, navLabel, colDates,
-  toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, isMobile, todayKey,
-  resizeTask
-}) {
+const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, bp, onSelect, toggleDone, moveTask, onAddOn }) {
+  const base = parseKey(rangeStart)
+  const startOfWeek = addDays(base, -base.getDay())
+  const weeks = Math.ceil((rangeDays + base.getDay()) / 7)
+  const today = new Date(); today.setHours(0,0,0,0)
+  const maxItems = bp==='mobile'? 3 : (weeks>=4?4:6)
+  const gridRef = useRef(null)
+  const [drag, setDrag] = useState(null)  // {id, deltaHalf}
   const dragRef = useRef(null)
-  const [pendingResize, setPendingResize] = useState(null)
 
-  const laidOut = useMemo(() => {
-    const tasks = pendingResize
-      ? filteredTasks.map(t => t.id === pendingResize.id
-          ? {...t, start_key: pendingResize.startKey, end_key: pendingResize.endKey}
-          : t)
-      : filteredTasks
-    return layoutTasks(tasks, viewDays, base)
-  }, [filteredTasks, pendingResize, viewDays, base])
+  const startDrag = useCallback((e, task, cellDate) => {
+    e.stopPropagation(); e.preventDefault()
+    const grid = gridRef.current
+    if(!grid) return
+    const gridRect = grid.getBoundingClientRect()
+    const cellW = gridRect.width / 7
+    const rowH = (gridRect.height - 32) / weeks
+    const startX = e.touches ? e.touches[0].clientX : e.clientX
+    const startY = e.touches ? e.touches[0].clientY : e.clientY
 
-  const maxLane  = laidOut.reduce((m, t) => Math.max(m, t.lane), -1)
-  const BAR_H    = 22
-  const MEMO_H   = 14  // メモ行の高さ
-  const LANE_H   = BAR_H + MEMO_H + 8  // バー + メモ + 余白
-  // メモがあるレーンはMEMO_H分追加
-  const laneHeights = useMemo(() => {
-    const arr = Array(maxLane + 1).fill(BAR_H + 8)
-    laidOut.forEach(t => { if (t.memo && t.lane <= maxLane) arr[t.lane] = BAR_H + MEMO_H + 8 })
-    return arr
-  }, [laidOut, maxLane])
-  const laneOffsets = useMemo(() => {
-    const offsets = []
-    let acc = 0
-    for (let i = 0; i <= maxLane; i++) { offsets.push(acc); acc += laneHeights[i] }
-    return offsets
-  }, [laneHeights, maxLane])
-  const GRID_H = Math.max((laneOffsets[maxLane] ?? 0) + (laneHeights[maxLane] ?? 0) + 8, 56)
+    // Determine drag mode based on which cell the user grabbed
+    const sDate = parseKey(task.start_key)
+    const eDate = parseKey(task.end_key)
+    const sameStart = sameDay(cellDate, sDate)
+    const sameEnd   = sameDay(cellDate, eDate)
+    let mode
+    if(sameStart && sameEnd)      mode = 'resize-end'   // single-day → drag extends end (1日→2,3日へ伸ばせる)
+    else if(sameStart)            mode = 'resize-start' // start cell → move start
+    else if(sameEnd)              mode = 'resize-end'   // end cell → move end
+    else                          mode = 'move'         // middle → move whole
 
-  const startResize = useCallback((e, task, edge, containerEl, wLen) => {
-    e.stopPropagation()
-    e.preventDefault()
+    dragRef.current = { task, mode, cellW, rowH, startX, startY, deltaDays: 0, moved: false }
 
-    // 全週のブロック（日付ヘッダー＋タスクエリア）の位置をドラッグ開始時に取得
-    const gridWrap = containerEl.closest('.kh-grid-wrap')
-    const taskAreas = gridWrap ? Array.from(gridWrap.querySelectorAll('.kh-week-block')) : [containerEl]
-    const weekBounds = taskAreas.map(el => {
-      const r = el.getBoundingClientRect()
-      return { top: r.top, bottom: r.bottom, left: r.left, width: r.width }
-    })
-    const colW = weekBounds[0].width / wLen
-
-    dragRef.current = {
-      edge, origTask: task, colW, weekBounds, wLen, base,
-      currentStart: task.start_key, currentEnd: task.end_key,
-    }
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-
-    const onMove = (ev) => {
-      const d = dragRef.current
-      if (!d) return
-
-      // カーソルがどの週の行にあるかをY座標で判定（最近傍の週にフォールバック）
-      let weekIdx = d.weekBounds.findIndex(b => ev.clientY >= b.top && ev.clientY < b.bottom)
-      if (weekIdx === -1) {
-        let minDist = Infinity
-        d.weekBounds.forEach((b, i) => {
-          const mid = (b.top + b.bottom) / 2
-          const dist = Math.abs(ev.clientY - mid)
-          if (dist < minDist) { minDist = dist; weekIdx = i }
-        })
-      }
-
-      // その週の中でのX位置から日を算出
-      const wb = d.weekBounds[weekIdx]
-      const xWithin = ev.clientX - wb.left
-      const dayInWeek = Math.max(0, Math.min(d.wLen - 1, Math.floor(xWithin / d.colW)))
-      const absDay = weekIdx * d.wLen + dayInWeek
-      const newDate = addDays(d.base, absDay)
-      const newKey  = toKey(newDate)
-
-      let newStart = d.origTask.start_key
-      let newEnd   = d.origTask.end_key
-      if (d.edge === 'right') {
-        if (newDate >= parseKey(d.origTask.start_key)) newEnd = newKey
-      } else {
-        if (newDate <= parseKey(d.origTask.end_key)) newStart = newKey
-      }
-
-      if (newStart !== d.currentStart || newEnd !== d.currentEnd) {
-        d.currentStart = newStart
-        d.currentEnd   = newEnd
-        setPendingResize({id: d.origTask.id, startKey: newStart, endKey: newEnd})
+    const onMove = ev => {
+      const d = dragRef.current; if(!d) return
+      const x = ev.touches ? ev.touches[0].clientX : ev.clientX
+      const y = ev.touches ? ev.touches[0].clientY : ev.clientY
+      const dx = x - d.startX
+      const dy = y - d.startY
+      // 半日単位スナップ（Shiftで1日単位に切り替え）
+      const useCoarse = ev.shiftKey
+      const stepX = useCoarse ? d.cellW : d.cellW/2
+      const xCells = Math.round(dx / stepX) * (useCoarse ? 1 : 0.5)
+      const yRows = Math.round(dy / d.rowH)
+      const newDelta = xCells + yRows*7
+      if(Math.abs(newDelta) >= 0.5) d.moved = true
+      if(newDelta !== d.deltaDays){
+        d.deltaDays = newDelta
+        setDrag({ id: d.task.id, deltaDays: newDelta, mode: d.mode })
       }
     }
-
     const onUp = () => {
       const d = dragRef.current
-      if (!d) return
-      resizeTask(d.origTask.id, d.currentStart, d.currentEnd)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', onUp)
+      if(d && d.moved && d.deltaDays !== 0){
+        const t = d.task
+        const deltaHalf = Math.round(d.deltaDays * 2)
+        const origSH = startHalf(t, base)
+        const origEH = endHalf(t, base)
+        let sH = origSH, eH = origEH
+        if(d.mode === 'move'){
+          sH = origSH + deltaHalf
+          eH = origEH + deltaHalf
+        } else if(d.mode === 'resize-start'){
+          sH = Math.min(origSH + deltaHalf, origEH - 1)
+        } else if(d.mode === 'resize-end'){
+          eH = Math.max(origEH + deltaHalf, origSH + 1)
+        }
+        const {day:sDay, frac:sFrac} = halfToDayFrac(sH)
+        const {day:eDay, frac:eFrac} = endHalfToDayFrac(eH)
+        moveTask(t.id, toKey(addDays(base,sDay)), toKey(addDays(base,eDay)), sFrac, eFrac)
+      }
       dragRef.current = null
-      setPendingResize(null)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      document.removeEventListener('pointermove', onMove)
-      document.removeEventListener('pointerup', onUp)
+      setDrag(null)
     }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchmove', onMove, {passive:false})
+    window.addEventListener('touchend', onUp)
+  }, [base, moveTask, weeks])
 
-    document.addEventListener('pointermove', onMove)
-    document.addEventListener('pointerup', onUp)
-  }, [resizeTask, base])
-
-  const weeks = []
-  for (let i = 0; i < viewDays; i += 7) weeks.push({ wo: i, days: colDates.slice(i, i + 7) })
+  // Apply pending drag delta
+  const adjustedTasks = useMemo(()=>{
+    if(!drag) return tasks
+    const deltaHalf = Math.round(drag.deltaDays * 2)
+    return tasks.map(t => {
+      if(t.id !== drag.id) return t
+      const origSH = startHalf(t, base)
+      const origEH = endHalf(t, base)
+      let sH = origSH, eH = origEH
+      if(drag.mode === 'move'){
+        sH = origSH + deltaHalf
+        eH = origEH + deltaHalf
+      } else if(drag.mode === 'resize-start'){
+        sH = Math.min(origSH + deltaHalf, origEH - 1)
+      } else if(drag.mode === 'resize-end'){
+        eH = Math.max(origEH + deltaHalf, origSH + 1)
+      }
+      const {day:sDay, frac:sFrac} = halfToDayFrac(sH)
+      const {day:eDay, frac:eFrac} = endHalfToDayFrac(eH)
+      return {...t, start_key:toKey(addDays(base,sDay)), end_key:toKey(addDays(base,eDay)), start_frac:sFrac, end_frac:eFrac}
+    })
+  }, [tasks, drag, base])
 
   return (
-    <>
-      <div className="kh-print-header">工程表 - {navLabel}</div>
-      <div className="kh-nav">
-        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o - 1)} aria-label="前週に移動">◀ 前週</button>
-        <span className="kh-nav-label">{navLabel}</span>
-        <button className="kh-nav-btn" onClick={() => setNavOffset(o => o + 1)} aria-label="次週に移動">次週 ▶</button>
-      </div>
-      {isMobile && viewDays > 7 && (
-        <div className="kh-zoom-hint">🔍 ピンチ操作で拡大できます</div>
-      )}
-      <div className="kh-grid-wrap">
-        {weeks.map(({ wo, days: week }) => {
-          const wLen = week.length
-          const weekTasks = laidOut.filter(t => t.endCol >= wo && t.col < wo + wLen)
-          return (
-            <div key={wo} className="kh-week-block">
-              <div className="kh-day-header" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
-                {week.map((date, di) => {
-                  const dow = date.getDay(), key = toKey(date), isToday = key === todayKey
-                  const cls = isToday ? "today" : dow === 0 ? "sun" : dow === 6 ? "sat" : ""
-                  return (
-                    <div key={di} className={`kh-day-cell${cls ? " " + cls : ""}`} 
-                      onClick={() => openModal(key)}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`${date.getMonth() + 1}月${date.getDate()}日 タスクを追加`}
-                      onKeyDown={e => e.key === "Enter" && openModal(key)}>
-                      <div className="kh-day-left">
-                        <span className="kh-dmonth">{date.getMonth() + 1}/</span>
-                        <span className={`kh-dnum${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>{date.getDate()}</span>
-                        <span className={`kh-dow${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}`}>({DAYS_JA[dow]})</span>
-                      </div>
-                      <span className="kh-plus">＋</span>
-                    </div>
-                  )
-                })}
-              </div>
-              <div className="kh-task-area" style={{height:GRID_H}}>
-                <div className="kh-col-grid" style={{gridTemplateColumns:`repeat(${wLen},1fr)`}}>
-                  {week.map((date, di) => (
-                    <div key={di} className="kh-col-div" style={{
-                      background: date.getDay() === 0 ? "rgba(200,0,0,0.04)" : date.getDay() === 6 ? "rgba(0,0,200,0.04)" : "transparent",
-                      borderRight: di === wLen - 1 ? "none" : undefined
-                    }}/>
-                  ))}
+    <div data-weeks={weeks} style={{height:'100%',display:'flex',flexDirection:'column',background:'var(--bg)',
+      padding:bp==='mobile'?6:10,overflow:'hidden'}}>
+      <div ref={gridRef} style={{flex:1,display:'grid',
+        gridTemplateColumns:'repeat(7,1fr)',
+        gridTemplateRows:`auto repeat(${weeks},1fr)`,
+        gap:0,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,overflow:'hidden',
+        minHeight:0}}>
+        {/* Day-of-week header */}
+        {DAYS_JA.map((d,i)=>(
+          <div key={i} style={{padding:'8px 6px',background:'var(--surface-2)',
+            borderBottom:'1px solid var(--border)',borderRight:i<6?'1px solid var(--border)':'none',
+            textAlign:'center',fontSize:11.5,fontWeight:700,fontFamily:'var(--font-jp)',
+            color:i===0?'var(--sun)':(i===6?'var(--sat)':'var(--text-2)')}}>{d}</div>
+        ))}
+        {/* Week rows */}
+        {Array.from({length:weeks}).map((_,wi)=>(
+          Array.from({length:7}).map((_,di)=>{
+            const date = addDays(startOfWeek, wi*7+di)
+            const dayTasks = adjustedTasks.filter(t=>{
+              const s = parseKey(t.start_key), e = parseKey(t.end_key)
+              return date >= s && date <= e
+            })
+            const isT = sameDay(date, today)
+            const we = isWeekend(date)
+            const outOfRange = date < base || date >= addDays(base, rangeDays)
+            return (
+              <div key={`${wi}-${di}`}
+                onClick={e=>{
+                  // Only fire if click target is the cell itself (not a task chip)
+                  if(e.target === e.currentTarget || e.target.dataset?.cellArea === '1'){
+                    if(!dragRef.current?.moved && !outOfRange) onAddOn?.(toKey(date))
+                  }
+                }}
+                style={{
+                borderRight:di<6?'1px solid var(--border)':'none',
+                borderBottom:wi<weeks-1?'1px solid var(--border)':'none',
+                background:isT?'var(--today)':(we?(di===0?'rgba(177,72,72,.04)':'rgba(47,93,160,.04)'):'var(--surface)'),
+                opacity:outOfRange?.45:1,padding:'5px 6px',display:'flex',flexDirection:'column',gap:3,
+                overflow:'hidden',minHeight:0,cursor:outOfRange?'default':'pointer',
+              }}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+                  <div style={{display:'flex',alignItems:'baseline',gap:3}}>
+                    {date.getDate()===1 && <span style={{fontSize:10,color:'var(--text-3)',fontFamily:'var(--font-jp)',fontWeight:600}}>{date.getMonth()+1}月</span>}
+                    <span className="mono num" style={{fontSize:bp==='mobile'?14:15,fontWeight:700,
+                      color:isT?'var(--accent-2)':(di===0?'var(--sun)':(di===6?'var(--sat)':'var(--text)'))}}>{date.getDate()}</span>
+                  </div>
+                  {dayTasks.length>0 && (
+                    <span className="mono num" style={{fontSize:9.5,color:'var(--text-4)',fontWeight:600}}>{dayTasks.length}</span>
+                  )}
                 </div>
-                {weekTasks.map(t => {
-                  const c  = COLORS.find(x => x.id === t.color) || COLORS[0]
-                  const ls = Math.max(t.col - wo, 0)
-                  const le = Math.min(t.endCol - wo, wLen - 1)
-                  const span = le - ls + 1
-                  const sh = t.col >= wo, eh = t.endCol < wo + wLen
-                  const isResizing = pendingResize?.id === t.id
-                  const laneTop = laneOffsets[t.lane] ?? t.lane * LANE_H
-                  const hasMemo = !!t.memo
+                <div data-cell-area="1" style={{display:'flex',flexDirection:'column',gap:2,overflow:'hidden',flex:1,minHeight:0}}>
+                  {(()=>{
+                    const overflow = dayTasks.length - maxItems
+                    return (<>
+                      {dayTasks.slice(0,maxItems).map(t=>{
+                        const cat = catById(t.color)
+                        const isDragging = drag && drag.id === t.id
+                        const sDate = parseKey(t.start_key)
+                        const eDate = parseKey(t.end_key)
+                        const isStart = sameDay(date, sDate)
+                        const isEnd   = sameDay(date, eDate)
+                        const sFrac = t.start_frac>=0.5 ? 0.5 : 0
+                        const eFrac = t.end_frac>=0.5 ? 0.5 : 0
+                        const halfLeft  = isStart && sFrac>=0.5
+                        const halfRight = isEnd   && eFrac>=0.5
+                        const hasMemo = !!(t.memo && t.memo.trim())
+                        const showText = isStart || di === 0  // text only on start or Sunday
+                        return (
+                          <div key={t.id}
+                            onMouseDown={e=>{ if(e.button===0) startDrag(e,t,date) }}
+                            onTouchStart={e=>startDrag(e,t,date)}
+                            onClick={e=>{ if(!dragRef.current?.moved) onSelect(t) }}
+                            style={{
+                              display:'flex',flexDirection:'column',gap:1,
+                              cursor:isDragging?'grabbing':'grab',touchAction:'none',
+                              opacity:isDragging?.7:1,
+                              marginLeft:halfLeft?'50%':0,
+                              marginRight:halfRight?'50%':0,
+                              boxShadow:isDragging?'0 4px 12px rgba(0,0,0,.25)':'none',
+                            }}>
+                            <div style={{
+                              background:cat.color,color:'#fff',padding:'2px 6px',
+                              borderTopLeftRadius:isStart?3:0,
+                              borderBottomLeftRadius:isStart?3:0,
+                              borderTopRightRadius:isEnd?3:0,
+                              borderBottomRightRadius:isEnd?3:0,
+                              fontSize:bp==='mobile'?10:11,fontWeight:600,fontFamily:'var(--font-jp)',
+                              whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+                              opacity:t.done?.5:1,lineHeight:1.4,minHeight:bp==='mobile'?16:18,
+                              textDecoration:t.done?'line-through':'none'}}>{showText ? t.text : ' '}</div>
+                            {hasMemo && (
+                              <div style={{
+                                padding:'1px 5px',
+                                fontSize:bp==='mobile'?9:9.5,fontWeight:600,
+                                color:cat.color,fontFamily:'var(--font-jp)',
+                                background:`${cat.color}22`,
+                                borderLeft:isStart?`2px solid ${cat.color}`:'none',
+                                borderTopLeftRadius:isStart?0:0,
+                                borderBottomLeftRadius:isStart?0:0,
+                                borderTopRightRadius:isEnd?3:0,
+                                borderBottomRightRadius:isEnd?3:0,
+                                whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+                                minHeight:bp==='mobile'?13:14,
+                                opacity:t.done?.5:1,lineHeight:1.35,
+                              }}>{showText ? t.memo : ' '}</div>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {overflow > 0 && (
+                        <div style={{fontSize:9.5,color:'var(--text-3)',fontFamily:'var(--font-jp)',fontWeight:600,marginTop:1}}>+{overflow}件</div>
+                      )}
+                    </>)
+                  })()}
+                </div>
+              </div>
+            )
+          })
+        ))}
+      </div>
+    </div>
+  )
+})
+
+// ────────────────────────────────────────────────
+// Agenda View (responsive: 2-col on tablet+, 1-col mobile)
+// ────────────────────────────────────────────────
+const AgendaView = memo(function AgendaView({ tasks, rangeStart, rangeDays, bp, onSelect, toggleDone }) {
+  const base = parseKey(rangeStart)
+  const today = new Date(); today.setHours(0,0,0,0)
+  const todayKey = toKey(today)
+  const dateList = Array.from({length:rangeDays},(_,i)=>addDays(base,i))
+
+  const cols = bp==='mobile'? 1 : (bp==='tablet'? 2 : 3)
+
+  return (
+    <div style={{height:'100%',overflow:'auto',padding:bp==='mobile'?10:14,background:'var(--bg)'}}>
+      <div style={{display:'grid',gridTemplateColumns:`repeat(${cols},1fr)`,gap:bp==='mobile'?10:14}}>
+        {dateList.map((date)=>{
+          const key = toKey(date)
+          const dayTasks = tasks.filter(t=>{
+            const s = parseKey(t.start_key), e = parseKey(t.end_key)
+            return date >= s && date <= e
+          })
+          if(dayTasks.length===0) return null
+          const isT = key===todayKey
+          const dow = DAYS_JA[date.getDay()]
+          const dayColor = date.getDay()===0?'var(--sun)':(date.getDay()===6?'var(--sat)':'var(--text)')
+          return (
+            <div key={key} style={{background:'var(--surface)',border:'1px solid var(--border)',
+              borderRadius:10,overflow:'hidden',display:'flex',flexDirection:'column',
+              boxShadow:isT?'0 0 0 2px var(--accent), var(--shadow-sm)':'var(--shadow-sm)'}}>
+              {/* Day header */}
+              <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',
+                background:isT?'var(--today)':'var(--surface-2)',borderBottom:'1px solid var(--border)'}}>
+                <div style={{
+                  width:38,height:38,borderRadius:7,
+                  background:isT?'var(--accent)':'var(--surface)',
+                  color:isT?'#fff':dayColor,
+                  border:isT?'none':'1px solid var(--border)',
+                  display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+                  flexShrink:0,
+                }}>
+                  <span style={{fontSize:9,fontWeight:700,opacity:.85,fontFamily:'var(--font-jp)',lineHeight:1}}>{dow}</span>
+                  <span className="mono num" style={{fontSize:14,fontWeight:700,lineHeight:1.05}}>{date.getDate()}</span>
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12.5,fontWeight:700,color:'var(--text)',fontFamily:'var(--font-jp)'}}>
+                    {isT?'今日 · ':''}{date.getMonth()+1}月{date.getDate()}日({dow})
+                  </div>
+                  <div style={{fontSize:10.5,color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>{dayTasks.length}件</div>
+                </div>
+              </div>
+
+              {/* Tasks */}
+              <div style={{display:'flex',flexDirection:'column'}}>
+                {dayTasks.map((t,i)=>{
+                  const cat = catById(t.color)
                   return (
-                    <div key={t.id} className={`kh-task-bar${t.done ? " done" : ""}${isResizing ? " resizing" : ""}`}
-                      title={`${t.text}${t.assignee ? " ／ " + t.assignee : ""}`}
-                      style={{
-                        top: laneTop + 2,
-                        left: `calc(${ls * 100 / wLen}% + ${sh ? 2 : 0}px)`,
-                        width: `calc(${span * 100 / wLen}% - ${(sh ? 2 : 0) + (eh ? 2 : 0)}px)`,
-                        height: hasMemo ? BAR_H + MEMO_H : BAR_H,
-                        background: c.bg,
-                        borderRadius: `${sh ? 4 : 0}px ${eh ? 4 : 0}px ${eh ? 4 : 0}px ${sh ? 4 : 0}px`,
-                        paddingLeft: sh ? 14 : 2,
-                        paddingRight: eh ? 14 : 2,
-                        zIndex: isResizing ? 15 : 10,
-                        flexDirection: 'column',
-                        alignItems: 'stretch',
-                        overflow: 'hidden',
-                      }}
-                      onClick={() => setPreviewTask(t)}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`タスク: ${t.text}`}
-                      onKeyDown={e => e.key === "Enter" && setPreviewTask(t)}>
-                      {/* バー行 */}
-                      <div style={{display:'flex',alignItems:'center',height:BAR_H,flexShrink:0}}>
-                        {sh && (
-                          <div className="kh-resize-handle kh-resize-handle-left"
-                            onPointerDown={e => startResize(e, t, 'left', e.currentTarget.closest('.kh-task-area'), wLen)}
-                            onClick={e => e.stopPropagation()}
-                          />
-                        )}
-                        {!sh && <span style={{marginRight:2,opacity:0.8,fontSize:8}}>◀</span>}
-                        <span className="kh-bar-text" style={{flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>
-                          {t.assignee && <span style={{opacity:0.7,marginRight:2}}>{t.assignee}</span>}
-                          {t.text}
-                        </span>
-                        {!eh && <span style={{marginLeft:2,opacity:0.8,fontSize:8}}>▶</span>}
-                        {eh && (
-                          <button className={`kh-done-check${t.done ? " checked" : ""}`}
-                            onClick={e => { e.stopPropagation(); toggleDone(t.id) }}
-                            aria-label={t.done ? "未完了に戻す" : "完了にする"}>{t.done ? "✓" : ""}</button>
-                        )}
-                        {eh && (
-                          <div className="kh-resize-handle kh-resize-handle-right"
-                            onPointerDown={e => startResize(e, t, 'right', e.currentTarget.closest('.kh-task-area'), wLen)}
-                            onClick={e => e.stopPropagation()}
-                          />
+                    <div key={t.id} onClick={()=>onSelect(t)}
+                      style={{display:'flex',cursor:'pointer',
+                        borderTop:i>0?'1px solid var(--border)':'none',
+                        opacity:t.done?.55:1,transition:'background .1s ease'}}
+                      onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                      <span style={{width:4,background:cat.color,flexShrink:0}}/>
+                      <div style={{flex:1,padding:'8px 10px',minWidth:0}}>
+                        <div style={{fontSize:12.5,fontWeight:600,color:'var(--text)',
+                          fontFamily:'var(--font-jp)',textDecoration:t.done?'line-through':'none',
+                          marginBottom:2,lineHeight:1.35,wordBreak:'break-word'}}>{t.text}</div>
+                        <div style={{display:'flex',gap:6,fontSize:10.5,color:'var(--text-3)',
+                          fontFamily:'var(--font-jp)',flexWrap:'wrap',alignItems:'center'}}>
+                          <span style={{display:'inline-flex',alignItems:'center',gap:3}}>
+                            <span style={{width:6,height:6,borderRadius:2,background:cat.color}}/>
+                            {cat.label}
+                          </span>
+                          {t.assignee && <><span>·</span><span>{t.assignee}</span></>}
+                          <span className="mono" style={{marginLeft:'auto',color:'var(--text-4)'}}>{fmtMD(parseKey(t.start_key))}–{fmtMD(parseKey(t.end_key))}</span>
+                        </div>
+                        {t.memo && (
+                          <div style={{marginTop:5,padding:'5px 8px',background:'var(--surface-2)',
+                            borderLeft:`2px solid ${cat.color}`,borderRadius:'0 4px 4px 0',
+                            fontSize:11,color:'var(--text-2)',fontFamily:'var(--font-jp)',
+                            whiteSpace:'pre-wrap',wordBreak:'break-word',lineHeight:1.45}}>{t.memo}</div>
                         )}
                       </div>
-                      {/* メモ行 */}
-                      {hasMemo && sh && (
-                        <div className="kh-bar-memo" style={{borderLeftColor: c.bg}}>
-                          📝 {t.memo}
+                      <button onClick={e=>{e.stopPropagation();toggleDone(t.id,!t.done)}}
+                        style={{width:40,background:'transparent',border:'none',borderLeft:'1px solid var(--border)',
+                          display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0}}>
+                        <div style={{width:20,height:20,borderRadius:'50%',
+                          border:`2px solid ${t.done?'#1F8A5B':'var(--text-4)'}`,
+                          background:t.done?'#1F8A5B':'transparent',
+                          color:'#fff',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                          {t.done && <Icon name="check" size={10}/>}
                         </div>
-                      )}
+                      </button>
                     </div>
                   )
                 })}
@@ -627,921 +1176,747 @@ const ScheduleView = memo(function ScheduleView({
           )
         })}
       </div>
-      <div className="kh-legend">
-        {COLORS.map(c => (
-          <div key={c.id} className="kh-legend-item">
-            <div className="kh-legend-dot" style={{background:c.bg}}/>{c.label}
-          </div>
-        ))}
-      </div>
-    </>
-  )
-})
 
-// ────────────────────────────────────────────────
-// PreviewCard
-// ────────────────────────────────────────────────
-const PreviewCard = memo(function PreviewCard({ task, onClose, toggleDone, openModal }) {
-  // Escキーでモーダルを閉じる
-  useEffect(() => {
-    const handler = (e) => { if (e.key === "Escape") onClose() }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [onClose])
-
-  if (!task) return null
-  const c = COLORS.find(x => x.id === task.color) || COLORS[0]
-  const s = parseKey(task.start_key), e = parseKey(task.end_key)
-  const days = diffDays(s, e)
-  const { company, person } = splitAssignee(task.assignee)
-  return (
-    <div className="kh-preview-bg" onClick={onClose}>
-      <div className="kh-preview-card" onClick={ev => ev.stopPropagation()}>
-        <div className="kh-preview-accent" style={{background:c.bg}}>
-          <div style={{flex:1}}>
-            <div className="kh-preview-type-badge">🏗 {c.label}</div>
-            <div className="kh-preview-title">{task.text}</div>
-          </div>
-          <button className="kh-preview-close" onClick={onClose} aria-label="閉じる">×</button>
+      {tasks.length===0 && (
+        <div style={{padding:'60px 20px',textAlign:'center',color:'var(--text-3)',fontFamily:'var(--font-jp)',gridColumn:'1/-1'}}>
+          タスクがありません
         </div>
-        <div className="kh-preview-body">
-          {task.done && <div className="kh-preview-done-badge">✅ 完了済み</div>}
-          <div className="kh-preview-daterange">
-            <div className="kh-preview-date-block">
-              <div className="kh-preview-date-label">📅 開始日</div>
-              <div className="kh-preview-date-value">{s.getMonth() + 1}/{s.getDate()}</div>
-              <div className="kh-preview-date-sub">{DAYS_JA[s.getDay()]}曜日</div>
-            </div>
-            <div className="kh-preview-date-arrow">→</div>
-            <div className="kh-preview-date-block">
-              <div className="kh-preview-date-label">🏁 終了日</div>
-              <div className="kh-preview-date-value">{e.getMonth() + 1}/{e.getDate()}</div>
-              <div className="kh-preview-date-sub">{DAYS_JA[e.getDay()]}曜日</div>
-            </div>
-          </div>
-          <div className="kh-preview-duration">
-            {days === 0 ? "📌 単日作業" : `📆 ${days + 1}日間（${task.start_key} 〜 ${task.end_key}）`}
-          </div>
-          <div className="kh-preview-info-row">
-            <div className="kh-preview-info-item">
-              <div className="kh-preview-info-label">🏢 会社名</div>
-              <div className={`kh-preview-info-value${company ? "" : " empty"}`}>{company || "未設定"}</div>
-            </div>
-            <div className="kh-preview-info-item">
-              <div className="kh-preview-info-label">👤 担当者</div>
-              <div className={`kh-preview-info-value${person ? "" : " empty"}`}>{person || "未設定"}</div>
-            </div>
-          </div>
-        </div>
-        <div className="kh-preview-actions">
-          <button className={`kh-preview-done-btn${task.done ? " is-done" : ""}`}
-            onClick={() => toggleDone(task.id)}>
-            {task.done ? "↩ 未完了に戻す" : "✓ 完了にする"}
-          </button>
-          <button className="kh-preview-edit-btn"
-            onClick={() => { onClose(); openModal(task.start_key, task) }}>✏️ 編集する</button>
-        </div>
-      </div>
+      )}
     </div>
   )
 })
 
 // ────────────────────────────────────────────────
-// PrintTab - 印刷専用タブ
+// List View
 // ────────────────────────────────────────────────
-const PrintTab = memo(function PrintTab({
-  filteredTasks, base, navLabel, isMobile,
-  toggleDone, deleteTaskById, setNavOffset, openModal, setPreviewTask, todayKey,
-  printMemos, setPrintMemos, printViewDays, setPrintViewDays
-}) {
-  const canvasRef = useRef(null)
-  const paperRef  = useRef(null)
-  const [subtitle, setSubtitle] = useState("")
-  const [printing, setPrinting] = useState(false)
-
-  const colorList = [
-    { id:"orange", label:"構造",   bg:"#E8521A", darker:"#C13D0F" },
-    { id:"blue",   label:"設備",   bg:"#1A6FE8", darker:"#0F4FB0" },
-    { id:"green",  label:"内装",   bg:"#1A9E5C", darker:"#0F7242" },
-    { id:"red",    label:"検査",   bg:"#D42020", darker:"#A01010" },
-    { id:"yellow", label:"定例",   bg:"#C49800", darker:"#936F00" },
-    { id:"purple", label:"搬入",   bg:"#7C3AED", darker:"#5B21B6" },
-    { id:"gray",   label:"その他", bg:"#52606D", darker:"#374151" },
-  ]
-
-  // 週数に応じたサイズ設定
-  const weekCount = printViewDays / 7
-  const PT_BAR  = weekCount === 1 ? 36 : weekCount === 2 ? 28 : 22
-  const PT_MEMO = weekCount === 1 ? 18 : weekCount === 2 ? 14 : 12
-  const DATE_H  = weekCount === 1 ? 40 : weekCount === 2 ? 30 : 24
-
-  const colDates = Array.from({ length: printViewDays }, (_, i) => addDays(base, i))
-
-  const laidOut = useMemo(
-    () => layoutTasks(filteredTasks, printViewDays, base),
-    [filteredTasks, printViewDays, base]
-  )
-
-  const weeks = []
-  for (let i = 0; i < printViewDays; i += 7) weeks.push({ wo: i, days: colDates.slice(i, i + 7) })
-
-  const titleMonth = colDates[0] ? `${colDates[0].getMonth() + 1}月` : ""
-
-  const addMemo = () => {
-    setPrintMemos([...printMemos, { id: Date.now(), text: "メモを入力", x: 100, y: 200, fontSize: 13, fontWeight: "normal" }])
-  }
-  const updateMemo = (id, updates) => setPrintMemos(printMemos.map(m => m.id === id ? {...m, ...updates} : m))
-  const deleteMemo = (id) => setPrintMemos(printMemos.filter(m => m.id !== id))
-
-  // 画面をそのまま画像として印刷
-  const captureAndPrint = async () => {
-    if (!paperRef.current || printing) return
-    setPrinting(true)
-    // キャプチャ前に非表示にする要素を記録
-    const toolbars = paperRef.current.querySelectorAll('.kh-pt-memo-toolbar')
-    try {
-      // メモツールバーを一時的に非表示にしてキャプチャ
-      toolbars.forEach(el => { el.style.display = 'none' })
-
-      const canvas = await html2canvas(paperRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        onclone: (clonedDoc) => {
-          // クローン内のtextareaの値をDOMに反映（html2canvasはvalue属性を読むため）
-          clonedDoc.querySelectorAll('textarea').forEach(ta => {
-            ta.textContent = ta.value
-          })
-        }
-      })
-
-      const imgData = canvas.toDataURL('image/png')
-      const pw = canvas.width, ph = canvas.height
-
-      const win = window.open('', '_blank')
-      if (!win) {
-        alert('ポップアップがブロックされました。ブラウザの設定でポップアップを許可してください。')
-        return
-      }
-      // 印刷エリア：A4横(297×210mm) - 余白(左右各8mm、上8mm、下20mm)
-      // = 281mm × 182mm
-      // 画像のアスペクト比に合わせてどちらで制約するか計算
-      const areaW = 281, areaH = 182  // mm
-      const imgAspect = pw / ph
-      const areaAspect = areaW / areaH
-      let finalW, finalH
-      if (imgAspect > areaAspect) {
-        finalW = areaW; finalH = Math.floor(areaW / imgAspect)
-      } else {
-        finalH = areaH; finalW = Math.floor(areaH * imgAspect)
-      }
-
-      win.document.write(`<!DOCTYPE html><html><head>
-        <meta charset="UTF-8">
-        <title>工程表 印刷</title>
-        <style>
-          *{margin:0;padding:0;box-sizing:border-box}
-          @page{size:A4 landscape;margin:0}
-          html,body{width:297mm;height:210mm;overflow:hidden;background:#fff;padding:8mm 8mm 20mm 8mm}
-          img{display:block}
-        </style>
-      </head><body>
-        <img src="${imgData}" style="width:${finalW}mm;height:${finalH}mm" />
-        <script>
-          window.onload = function(){
-            setTimeout(function(){ window.print(); }, 300)
-          }
-        </script>
-      </body></html>`)
-      win.document.close()
-    } catch (err) {
-      console.error('印刷キャプチャエラー:', err)
-      alert('印刷の準備中にエラーが発生しました。')
-    } finally {
-      // エラーが起きても必ずツールバーを元に戻す
-      toolbars.forEach(el => { el.style.display = '' })
-      setPrinting(false)
-    }
-  }
+const ListView = memo(function ListView({ tasks, bp, onSelect, toggleDone, deleteTask }) {
+  const sorted = useMemo(()=> [...tasks].sort((a,b)=> a.start_key.localeCompare(b.start_key)), [tasks])
 
   return (
-    <div className="kh-print-tab">
-      <div className="kh-print-toolbar">
-        <div style={{display:'flex',gap:4,marginRight:8}}>
-          {[7,14,28].map(n => (
-            <button key={n} className="kh-print-tool-btn"
-              style={{
-                padding:'6px 12px',
-                background: printViewDays === n ? '#F5C200' : 'rgba(255,255,255,0.1)',
-                color: printViewDays === n ? '#192536' : '#fff',
-                fontWeight: printViewDays === n ? 900 : 700,
-                borderColor: printViewDays === n ? '#F5C200' : 'rgba(255,255,255,0.25)'
-              }}
-              onClick={() => setPrintViewDays(n)}>{n}日</button>
-          ))}
-        </div>
-        <button className="kh-print-tool-btn" onClick={addMemo}>＋ メモ追加</button>
-        <button className="kh-print-tool-btn kh-print-execute"
-          onClick={captureAndPrint}
-          disabled={printing}
-          style={{opacity: printing ? 0.6 : 1, cursor: printing ? 'wait' : 'pointer'}}>
-          {printing ? '⏳ 準備中...' : '🖨 印刷する'}
-        </button>
-        <span className="kh-print-hint">{isMobile ? "メモ：長押しで編集、ドラッグで移動" : "メモはドラッグで移動、ダブルクリック/長押しで編集"}</span>
-      </div>
-      <div className="kh-pt-canvas" ref={canvasRef}>
-        <div className="kh-pt-paper" data-weeks={weekCount} ref={paperRef}>
-          {/* ヘッダー */}
-          <div className="kh-pt-header">
-            <div className="kh-pt-title">{titleMonth}　工程表</div>
-            <textarea
-              className="kh-pt-subtitle"
-              value={subtitle}
-              rows={1}
-              onChange={e => {
-                setSubtitle(e.target.value)
-                // 内容に合わせて高さを自動調整
-                e.target.style.height = 'auto'
-                e.target.style.height = e.target.scrollHeight + 'px'
-              }}
-              placeholder="工程フロー・備考等を入力（任意）"
-            />
-            <div className="kh-pt-legend">
-              {colorList.map(c => (
-                <div key={c.id} className="kh-pt-legend-item">
-                  <div className="kh-pt-legend-dot" style={{background: c.bg}} />
-                  <span>{c.label}</span>
-                </div>
-              ))}
-            </div>
+    <div style={{height:'100%',overflow:'auto',padding:bp==='mobile'?10:16,background:'var(--bg)'}}>
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,overflow:'hidden'}}>
+        {/* Header row */}
+        {bp!=='mobile' && (
+          <div style={{display:'grid',gridTemplateColumns:'40px 1.6fr 90px 100px 100px 1.2fr 60px',
+            padding:'10px 14px',background:'var(--surface-2)',borderBottom:'1px solid var(--border)',
+            fontSize:10,fontWeight:600,letterSpacing:'.06em',textTransform:'uppercase',
+            color:'var(--text-3)',fontFamily:'var(--font-jp)',gap:8,alignItems:'center'}}>
+            <div></div>
+            <div>タスク</div>
+            <div>工種</div>
+            <div>開始</div>
+            <div>終了</div>
+            <div>担当</div>
+            <div style={{textAlign:'right'}}>操作</div>
           </div>
-
-          {/* カレンダー */}
-          <div className="kh-pt-calendar">
-            <div className="kh-pt-dow-row">
-              {["日","月","火","水","木","金","土"].map((d,i) => (
-                <div key={i} className={`kh-pt-dow-cell${i===0?" sun":i===6?" sat":""}`}>{d}</div>
-              ))}
-            </div>
-
-            {weeks.map(week => {
-              const wo = week.wo
-              const weekTasks = laidOut.filter(t => t.col <= wo + 6 && t.endCol >= wo)
-              const maxLanePt = weekTasks.reduce((m, t) => Math.max(m, t.lane), -1)
-              const ptLaneH = (lane) => weekTasks.some(t => t.lane === lane && t.memo) ? PT_BAR + PT_MEMO + 6 : PT_BAR + 6
-              const ptLaneOffsets = []
-              let ptAcc = 0
-              for (let i = 0; i <= maxLanePt; i++) { ptLaneOffsets.push(ptAcc); ptAcc += ptLaneH(i) }
-              const ganttH = Math.max(ptAcc + 8, 38)
-
-              return (
-                <div key={wo} className="kh-pt-week">
-                  <div className="kh-pt-date-row">
-                    {week.days.map((d, idx) => {
-                      const dk = toKey(d)
-                      const dow = d.getDay()
-                      const isToday = dk === todayKey
-                      return (
-                        <div key={idx} className={`kh-pt-date-cell${dow===0?" sun":dow===6?" sat":""}${isToday?" today":""}`}
-                          style={{minHeight: DATE_H, fontSize: weekCount===1?18:weekCount===2?15:13}}>
-                          <span className="kh-pt-date-num">{d.getDate()}</span>
-                          {d.getDate() === 1 && <span className="kh-pt-date-month">{d.getMonth()+1}月</span>}
-                        </div>
-                      )
-                    })}
-                  </div>
-                  <div className="kh-pt-gantt" style={{minHeight: ganttH}}>
-                    {[1,2,3,4,5,6].map(i => (
-                      <div key={i} className="kh-pt-col-line" style={{left:`${i/7*100}%`}} />
-                    ))}
-                    {weekTasks.map(t => {
-                      const color = colorList.find(c => c.id === t.color) || colorList[0]
-                      const weekCol    = Math.max(0, t.col - wo)
-                      const weekEndCol = Math.min(6, t.endCol - wo)
-                      const weekSpan   = weekEndCol - weekCol + 1
-                      const isStart = t.col >= wo
-                      const isEnd   = t.endCol <= wo + 6
-                      const { company, person } = splitAssignee(t.assignee)
-                      const label = person || company || ""
-                      const borderRadius = isStart && isEnd ? '4px'
-                                         : isStart          ? '4px 0 0 4px'
-                                         : isEnd            ? '0 4px 4px 0' : '0'
-                      const ptTop = ptLaneOffsets[t.lane] ?? t.lane * (PT_BAR + 3)
-                      const hasMemoPt = !!t.memo && isStart
-                      return (
-                        <div
-                          key={t.id}
-                          className={`kh-pt-bar${t.done?" done":""}`}
-                          style={{
-                            left:   `${weekCol/7*100}%`,
-                            width:  `${weekSpan/7*100}%`,
-                            top:    ptTop + 2,
-                            height: hasMemoPt ? PT_BAR + PT_MEMO : PT_BAR,
-                            background: color.bg,
-                            borderRadius,
-                            borderRight: !isEnd ? `3px solid ${color.darker}` : undefined,
-                            flexDirection: 'column',
-                            alignItems: 'stretch',
-                            overflow: 'hidden',
-                          }}>
-                          <div style={{display:'flex',alignItems:'center',height:PT_BAR,flexShrink:0,fontSize: weekCount===1?13:weekCount===2?11:9}}>
-                            {!isStart && <span className="kh-pt-bar-startmark">◀</span>}
-                            <div className="kh-pt-bar-inner">
-                              {isStart && label && <div className="kh-pt-bar-person" style={{fontSize: weekCount===1?11:weekCount===2?9:8}}>{label}</div>}
-                              {isStart
-                                ? <div className="kh-pt-bar-name" style={{fontSize: weekCount===1?13:weekCount===2?11:9}}>{t.text}</div>
-                                : <div className="kh-pt-bar-cont">{t.text}</div>}
-                            </div>
-                            {!isEnd && <span className="kh-pt-bar-arrow">▶</span>}
-                          </div>
-                          {hasMemoPt && (
-                            <div className="kh-pt-bar-memo">📝 {t.memo}</div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* メモ */}
-          {printMemos.map(memo => {
-            const editText = () => {
-              const t = prompt("メモを入力:", memo.text)
-              if (t !== null) updateMemo(memo.id, {text: t})
-            }
-
-            const startDrag = (e) => {
-              if (e.target.tagName === 'BUTTON') return
-              e.preventDefault()
-              const el = e.currentTarget.closest('.kh-pt-memo')
-              const startX = e.clientX, startY = e.clientY
-              const origX = memo.x, origY = memo.y
-              let dragging = false
-              // タッチ操作のみ長押し編集（PCはダブルクリック）
-              let longPressTimer = e.pointerType === 'touch'
-                ? setTimeout(() => { longPressTimer = null; editText() }, 600)
-                : null
-
-              const cleanup = () => {
-                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null }
-                document.removeEventListener('pointermove', onMove)
-                document.removeEventListener('pointerup', onUp)
-              }
-              const onMove = (ev) => {
-                if (!dragging) {
-                  if (Math.abs(ev.clientX - startX) < 4 && Math.abs(ev.clientY - startY) < 4) return
-                  dragging = true
-                  // ドラッグ開始したら長押しキャンセル
-                  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null }
-                  el.setPointerCapture(e.pointerId)
-                }
-                updateMemo(memo.id, {
-                  x: origX + (ev.clientX - startX),
-                  y: origY + (ev.clientY - startY),
-                })
-              }
-              const onUp = () => cleanup()
-
-              // documentレベルで登録→要素外で離してもクリーンアップされる
-              document.addEventListener('pointermove', onMove)
-              document.addEventListener('pointerup', onUp)
-            }
-
+        )}
+        {sorted.map(t=>{
+          const cat = catById(t.color)
+          if(bp==='mobile'){
             return (
-              <div key={memo.id} className="kh-pt-memo" style={{left: memo.x, top: memo.y}}>
-                {/* ツールバー（常時表示） */}
-                <div className="kh-pt-memo-toolbar" onPointerDown={startDrag}>
-                  <button onClick={() => updateMemo(memo.id, {fontSize: (memo.fontSize||12)+2})}>A＋</button>
-                  <button onClick={() => updateMemo(memo.id, {fontSize: Math.max(8, (memo.fontSize||12)-2)})}>A－</button>
-                  <button style={{fontWeight:'bold'}} onClick={() => updateMemo(memo.id, {fontWeight: memo.fontWeight==="bold"?"normal":"bold"})}>B</button>
-                  <button className="kh-pt-memo-del" onClick={() => deleteMemo(memo.id)}>✕</button>
-                </div>
-                {/* テキスト本体：ドラッグ可能、PC=ダブルクリック編集、スマホ=長押し編集 */}
-                <div className="kh-pt-memo-body"
-                  style={{fontSize: memo.fontSize||12, fontWeight: memo.fontWeight||'normal', cursor:'move'}}
-                  onPointerDown={startDrag}
-                  onDoubleClick={editText}>
-                  {memo.text}
+              <div key={t.id} onClick={()=>onSelect(t)}
+                style={{display:'flex',padding:'10px 12px',borderBottom:'1px solid var(--border)',
+                  cursor:'pointer',gap:10,alignItems:'center',opacity:t.done?.55:1}}>
+                <button onClick={e=>{e.stopPropagation();toggleDone(t.id,!t.done)}}
+                  style={{width:22,height:22,borderRadius:'50%',
+                    border:`2px solid ${t.done?'#1F8A5B':'var(--text-4)'}`,
+                    background:t.done?'#1F8A5B':'transparent',cursor:'pointer',padding:0,
+                    display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}}>
+                  {t.done && <Icon name="check" size={11}/>}
+                </button>
+                <span style={{width:4,height:30,borderRadius:2,background:cat.color,flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,fontFamily:'var(--font-jp)',
+                    textDecoration:t.done?'line-through':'none',
+                    overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.text}</div>
+                  <div style={{fontSize:11,color:'var(--text-3)',fontFamily:'var(--font-jp)',display:'flex',gap:6,flexWrap:'wrap'}}>
+                    <span>{cat.label}</span>
+                    {t.assignee && <span>· {t.assignee}</span>}
+                    <span className="mono">· {fmtMD(parseKey(t.start_key))}–{fmtMD(parseKey(t.end_key))}</span>
+                  </div>
                 </div>
               </div>
             )
-          })}
-        </div>
+          }
+          return (
+            <div key={t.id} onClick={()=>onSelect(t)}
+              style={{display:'grid',gridTemplateColumns:'40px 1.6fr 90px 100px 100px 1.2fr 60px',
+                padding:'10px 14px',borderBottom:'1px solid var(--border)',cursor:'pointer',gap:8,
+                alignItems:'center',opacity:t.done?.55:1,
+                transition:'background .1s ease'}}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              <button onClick={e=>{e.stopPropagation();toggleDone(t.id,!t.done)}}
+                style={{width:22,height:22,borderRadius:'50%',
+                  border:`2px solid ${t.done?'#1F8A5B':'var(--text-4)'}`,
+                  background:t.done?'#1F8A5B':'transparent',cursor:'pointer',padding:0,
+                  display:'flex',alignItems:'center',justifyContent:'center',color:'#fff'}}>
+                {t.done && <Icon name="check" size={11}/>}
+              </button>
+              <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0}}>
+                <span style={{width:4,height:18,borderRadius:2,background:cat.color,flexShrink:0}}/>
+                <span style={{fontSize:13,fontWeight:500,fontFamily:'var(--font-jp)',
+                  textDecoration:t.done?'line-through':'none',
+                  overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.text}</span>
+              </div>
+              <span style={{fontSize:11.5,color:'var(--text-2)',fontFamily:'var(--font-jp)'}}>{cat.label}</span>
+              <span className="mono num" style={{fontSize:12,color:'var(--text-2)'}}>{fmtMD(parseKey(t.start_key))}</span>
+              <span className="mono num" style={{fontSize:12,color:'var(--text-2)'}}>{fmtMD(parseKey(t.end_key))}</span>
+              <span style={{fontSize:12,fontFamily:'var(--font-jp)',color:'var(--text-2)',
+                overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.assignee||'—'}</span>
+              <div style={{display:'flex',justifyContent:'flex-end',gap:4}}>
+                <button onClick={e=>{e.stopPropagation();deleteTask(t.id)}}
+                  style={{width:26,height:26,padding:0,background:'transparent',border:'1px solid var(--border)',
+                    borderRadius:5,cursor:'pointer',color:'var(--text-3)',
+                    display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <Icon name="trash" size={13}/>
+                </button>
+              </div>
+            </div>
+          )
+        })}
+        {sorted.length===0 && (
+          <div style={{padding:'40px 20px',textAlign:'center',color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>
+            タスクがありません
+          </div>
+        )}
       </div>
     </div>
   )
 })
 
 // ────────────────────────────────────────────────
-// EditModal
+// Task Detail Panel
 // ────────────────────────────────────────────────
-const EditModal = memo(function EditModal({
-  editId, taskText, setTaskText, companyInput, setCompanyInput, personInput, setPersonInput,
-  memoInput, setMemoInput,
-  startDate, setStartDate, endDate, setEndDate, selectedColor, setSelectedColor,
-  assigneeHistory, setAssigneeHistory, saveTask, deleteTaskById, closeModal, taskTextRef
-}) {
-  const isEdit = editId !== null
+function TaskDetailPanel({ task, onClose, bp, onEdit, onToggleDone, onDelete }) {
+  if(!task) return null
+  const cat = catById(task.color)
+  const start = parseKey(task.start_key), end = parseKey(task.end_key)
+  const duration = diffDays(start,end)+1
 
-  // Escキーでモーダルを閉じる
-  useEffect(() => {
-    const handler = (e) => { if (e.key === "Escape") closeModal() }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [closeModal])
-
-  // 開始日変更時は終了日を補正（開始日より前にならないように）
-  const onStartChange = (v) => {
-    setStartDate(v)
-    if (v > endDate) setEndDate(v)
-  }
-
-  // 終了日変更時も開始日より前にならないよう補正
-  const onEndChange = (v) => {
-    if (v < startDate) {
-      setEndDate(startDate)
-    } else {
-      setEndDate(v)
-    }
+  const containerStyle = bp==='mobile' ? {
+    position:'fixed',inset:0,zIndex:90,background:'var(--surface)',
+    display:'flex',flexDirection:'column',animation:'slideInR .2s ease',
+  } : {
+    position:'absolute',right:0,top:0,bottom:0,width:380,background:'var(--surface)',
+    borderLeft:'1px solid var(--border)',boxShadow:'var(--shadow-lg)',zIndex:50,
+    display:'flex',flexDirection:'column',animation:'slideInR .2s ease',
   }
 
   return (
-    <div className="kh-modal-bg" onClick={closeModal}>
-      <div className="kh-modal" onClick={e => e.stopPropagation()}>
-        <div className="kh-modal-head">
-          <div className="kh-modal-title">{isEdit ? "✏️ タスクを編集" : "📝 タスク追加"}</div>
-          {isEdit && (
-            <button className="kh-del-btn" onClick={() => deleteTaskById(editId)}>🗑 削除</button>
-          )}
-        </div>
-        <div className="kh-field-label">🔨 作業内容</div>
-        <input ref={taskTextRef} className="kh-task-input" value={taskText}
-          onChange={e => setTaskText(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && saveTask()}
-          placeholder="例：1F 配筋検査 13:00〜"
-          aria-label="作業内容"/>
-        <div className="kh-assignee-wrap">
-          <div className="kh-field-label">🏢 担当</div>
-          <div className="kh-assignee-row">
-            <input className="kh-assignee-input" value={companyInput}
-              onChange={e => setCompanyInput(e.target.value)} 
-              placeholder="会社名（例：山田工務店）"
-              aria-label="会社名"/>
-            <input className="kh-assignee-input" value={personInput}
-              onChange={e => setPersonInput(e.target.value)} 
-              placeholder="担当者名（例：田中）"
-              aria-label="担当者名"/>
+    <div style={containerStyle}>
+      <div style={{padding:'16px 20px',borderBottom:'1px solid var(--border)',
+        display:'flex',alignItems:'flex-start',gap:12,flexShrink:0}}>
+        <span style={{width:4,alignSelf:'stretch',borderRadius:2,background:cat.color,marginTop:4}}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:'.08em',textTransform:'uppercase',color:cat.color,marginBottom:4}}>
+            {cat.en} · {cat.label}
           </div>
-          {assigneeHistory.length > 0 && (
-            <>
-              <div className="kh-history-label">📋 履歴から選ぶ</div>
-              <div className="kh-assignee-history">
-                {assigneeHistory.map((h, i) => (
-                  <div key={i} className="kh-history-item">
-                    <button className="kh-history-name"
-                      onClick={() => { setCompanyInput(h.company || ""); setPersonInput(h.person || "") }}
-                      aria-label={`履歴から選択: ${h.company || ""} ${h.person || ""}`}>
-                      {h.company && h.person ? `${h.company} ${h.person}` : h.company || h.person}
-                    </button>
-                    <button className="kh-history-del"
-                      onClick={() => setAssigneeHistory(prev => prev.filter((_, j) => j !== i))}
-                      aria-label="履歴を削除">×</button>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+          <h3 style={{margin:0,fontSize:18,fontWeight:600,fontFamily:'var(--font-jp)',color:'var(--text)',
+            textDecoration:task.done?'line-through':'none'}}>{task.text}</h3>
         </div>
-        <div className="kh-field-label" style={{marginBottom:8}}>🏗 工種</div>
-        <div className="kh-color-btns">
-          {COLORS.map(c => (
-            <button key={c.id} className="kh-color-btn"
-              style={{
-                background: c.bg,
-                transform: selectedColor === c.id ? "scale(1.1)" : "none",
-                outline: selectedColor === c.id ? `3px solid ${c.bg}` : "none",
-                outlineOffset: 2
-              }}
-              onClick={() => setSelectedColor(c.id)}
-              aria-label={`工種: ${c.label}`}
-              aria-pressed={selectedColor === c.id}>🏗 {c.label}</button>
-          ))}
-        </div>
-        <div className="kh-date-row">
-          <div className="kh-date-col">
-            <div className="kh-field-label">📅 開始日</div>
-            <input type="date" className="kh-date-input" value={startDate}
-              onChange={e => onStartChange(e.target.value)}
-              aria-label="開始日"/>
-          </div>
-          <div className="kh-date-arrow" style={{fontSize:20,color:"#C8C3BA",paddingBottom:8}}>→</div>
-          <div className="kh-date-col">
-            <div className="kh-field-label">🏁 終了日</div>
-            <input type="date" className="kh-date-input" value={endDate}
-              min={startDate}
-              onChange={e => onEndChange(e.target.value)}
-              aria-label="終了日"/>
+        <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',
+          color:'var(--text-3)',padding:8,margin:-8,lineHeight:1}}>
+          <Icon name="close" size={18}/>
+        </button>
+      </div>
+
+      <div style={{flex:1,overflowY:'auto',padding:'16px 20px',display:'flex',flexDirection:'column',gap:18}}>
+        <div style={{display:'grid',gridTemplateColumns:'80px 1fr',gap:'12px 16px',fontSize:12.5}}>
+          <span style={{color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>期間</span>
+          <span className="mono" style={{color:'var(--text)'}}>
+            {fmtMD(start)}({DAYS_JA[start.getDay()]}){(task.start_frac||0)>=0.5 && <span style={{color:'var(--accent-2)',fontFamily:'var(--font-jp)',marginLeft:3}}>午後</span>} → {fmtMD(end)}({DAYS_JA[end.getDay()]}){(task.end_frac||0)>=0.5 && <span style={{color:'var(--accent-2)',fontFamily:'var(--font-jp)',marginLeft:3}}>午前</span>}
+            <span style={{marginLeft:8,color:'var(--text-3)'}}>
+              {duration - ((task.start_frac||0)+(task.end_frac||0))}日間
+            </span>
+          </span>
+          <span style={{color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>担当</span>
+          <span style={{fontFamily:'var(--font-jp)',color:'var(--text)'}}>{task.assignee || '—'}</span>
+          <span style={{color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>状態</span>
+          <div>
+            <span style={{display:'inline-flex',alignItems:'center',gap:6,padding:'3px 10px',
+              borderRadius:20,background:task.done?'rgba(31,138,91,.12)':'rgba(228,161,26,.12)',
+              color:task.done?'#1F8A5B':'var(--accent-2)',fontSize:11.5,fontWeight:600,fontFamily:'var(--font-jp)'}}>
+              {task.done?'完了 (100%)':'未完了 (0%)'}
+            </span>
           </div>
         </div>
-        <div className="kh-field-label">📝 メモ（任意）</div>
-        <textarea className="kh-memo-input" value={memoInput}
-          onChange={e => setMemoInput(e.target.value)}
-          placeholder="備考・注意事項など"
-          aria-label="メモ"/>
-        <button className="kh-save-btn" onClick={saveTask}>{isEdit ? "更新する" : "追加する"}</button>
+
+        {task.memo && (
+          <div>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:'.08em',textTransform:'uppercase',
+              color:'var(--text-3)',marginBottom:8}}>メモ</div>
+            <div style={{padding:'10px 12px',background:'var(--surface-2)',borderLeft:`3px solid ${cat.color}`,
+              borderRadius:'0 6px 6px 0',fontSize:12.5,color:'var(--text-2)',
+              fontFamily:'var(--font-jp)',whiteSpace:'pre-wrap',wordBreak:'break-word',lineHeight:1.6}}>
+              {task.memo}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{display:'flex',gap:8,padding:16,borderTop:'1px solid var(--border)',flexShrink:0}}>
+        <button onClick={()=>onToggleDone(task.id, !task.done)}
+          style={{flex:1,height:40,background:task.done?'var(--surface-2)':'#1F8A5B',color:task.done?'var(--text-2)':'#fff',
+            border:task.done?'1px solid var(--border)':'none',borderRadius:7,cursor:'pointer',
+            fontSize:13,fontWeight:500,fontFamily:'var(--font-jp)'}}>
+          {task.done?'未完了に戻す':'完了にする'}
+        </button>
+        <button onClick={()=>onEdit(task)}
+          style={{flex:1,height:40,background:'var(--accent)',color:'#fff',border:'none',borderRadius:7,
+            cursor:'pointer',fontSize:13,fontWeight:500,fontFamily:'var(--font-jp)'}}>編集</button>
+        <button onClick={()=>{if(confirm('削除しますか？')) onDelete(task.id)}}
+          style={{width:40,height:40,background:'var(--surface-2)',color:'#D42020',
+            border:'1px solid var(--border)',borderRadius:7,cursor:'pointer',
+            display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <Icon name="trash" size={15}/>
+        </button>
       </div>
     </div>
   )
-})
+}
 
 // ────────────────────────────────────────────────
-// App (Main)
+// Task Edit Modal
+// ────────────────────────────────────────────────
+function TaskEditModal({ open, editTask, onClose, onSave, onDelete, assigneeHistory, removeFromHistory, bp }) {
+  const [text, setText] = useState('')
+  const [company, setCompany] = useState('')
+  const [person, setPerson] = useState('')
+  const [startKey, setStartKey] = useState('')
+  const [endKey, setEndKey] = useState('')
+  const [startPM, setStartPM] = useState(false)  // 開始: 午後から (start_frac=0.5)
+  const [endAM, setEndAM] = useState(false)      // 終了: 午前まで (end_frac=0.5)
+  const [color, setColor] = useState('orange')
+  const [memo, setMemo] = useState('')
+
+  useEffect(()=>{
+    if(open && editTask?.id){
+      // Edit existing task
+      setText(editTask.text||'')
+      const sp = splitAssignee(editTask.assignee)
+      setCompany(sp.company); setPerson(sp.person)
+      setStartKey(editTask.start_key||'')
+      setEndKey(editTask.end_key||'')
+      setStartPM((editTask.start_frac||0) >= 0.5)
+      setEndAM((editTask.end_frac||0) >= 0.5)
+      setColor(editTask.color||'orange')
+      setMemo(editTask.memo||'')
+    } else if(open){
+      // New task — optionally pre-filled with date from calendar cell click
+      setText(''); setCompany(''); setPerson('')
+      const today = toKey(new Date())
+      setStartKey(editTask?.start_key || today)
+      setEndKey(editTask?.end_key || today)
+      setStartPM(false); setEndAM(false)
+      setColor('orange'); setMemo('')
+    }
+  }, [open, editTask])
+
+  if(!open) return null
+
+  const handleSave = () => {
+    if(!text.trim()){ alert('タスク名を入力してください'); return }
+    if(!startKey || !endKey){ alert('日付を入力してください'); return }
+    if(startKey > endKey){ alert('終了日は開始日以降にしてください'); return }
+    if(startKey === endKey && startPM && endAM){
+      alert('同日で「午後開始」かつ「午前終了」はできません'); return
+    }
+    onSave({
+      id: editTask?.id || undefined,
+      text: text.trim(),
+      assignee: assigneeLabel(company, person),
+      start_key: startKey, end_key: endKey,
+      start_frac: startPM ? 0.5 : 0,
+      end_frac:   endAM  ? 0.5 : 0,
+      color, memo: memo.trim() || null,
+    })
+  }
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(20,18,12,.5)',zIndex:200,
+      display:'flex',alignItems:bp==='mobile'?'flex-end':'center',justifyContent:'center',
+      animation:'fadeIn .15s ease',padding:bp==='mobile'?0:20}}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        background:'var(--surface)',
+        borderRadius:bp==='mobile'?'20px 20px 0 0':12,
+        padding:24,width:'100%',maxWidth:520,maxHeight:'92vh',overflowY:'auto',
+        animation:'slideUp .2s ease',boxShadow:'var(--shadow-lg)',
+      }}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+          <h3 style={{margin:0,fontSize:17,fontWeight:700,fontFamily:'var(--font-jp)',color:'var(--text)'}}>
+            {editTask?.id?'タスク編集':'新規タスク'}
+          </h3>
+          {editTask?.id && (
+            <button onClick={()=>{if(confirm('削除しますか？')) onDelete(editTask.id)}}
+              style={{background:'rgba(212,32,32,.1)',border:'none',borderRadius:7,color:'#D42020',
+                fontWeight:600,fontSize:12,padding:'6px 12px',cursor:'pointer',fontFamily:'var(--font-jp)'}}>
+              削除
+            </button>
+          )}
+        </div>
+
+        <Label>タスク名</Label>
+        <input value={text} onChange={e=>setText(e.target.value)} placeholder="例：基礎コンクリート打設"
+          style={inputStyle}/>
+
+        <Label>担当（会社・氏名）</Label>
+        <div style={{display:'flex',gap:8,marginBottom:8}}>
+          <input value={company} onChange={e=>setCompany(e.target.value)} placeholder="会社名" list="kh-companies"
+            style={{...inputStyle,marginBottom:0,flex:1}}/>
+          <input value={person} onChange={e=>setPerson(e.target.value)} placeholder="氏名"
+            style={{...inputStyle,marginBottom:0,flex:1}}/>
+        </div>
+        <datalist id="kh-companies">
+          {PRESET_ASSIGNEES.map(a => <option key={a.company} value={a.company}>{a.role}</option>)}
+        </datalist>
+
+        {/* preset chips */}
+        <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:8}}>
+          {PRESET_ASSIGNEES.map(a=>(
+            <button key={a.company} onClick={()=>setCompany(a.company)}
+              style={{padding:'3px 9px',borderRadius:20,border:'1px solid var(--border)',
+                background:'var(--surface-2)',color:'var(--text-2)',fontSize:11,fontWeight:500,
+                fontFamily:'var(--font-jp)',cursor:'pointer'}}>
+              {a.company} <span style={{color:'var(--text-4)'}}>· {a.role}</span>
+            </button>
+          ))}
+        </div>
+
+        {assigneeHistory.length>0 && (
+          <>
+            <div style={{fontSize:10,fontWeight:600,color:'var(--text-4)',marginBottom:6,letterSpacing:'.05em'}}>履歴</div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:14}}>
+              {assigneeHistory.slice(0,12).map(h=>(
+                <div key={h} style={{display:'inline-flex',alignItems:'center',borderRadius:20,
+                  border:'1px solid var(--border)',background:'var(--surface)',overflow:'hidden'}}>
+                  <button onClick={()=>{const sp=splitAssignee(h);setCompany(sp.company);setPerson(sp.person)}}
+                    style={{padding:'3px 8px 3px 10px',border:'none',background:'transparent',
+                      color:'var(--text-2)',fontSize:11,fontWeight:500,fontFamily:'var(--font-jp)',cursor:'pointer'}}>
+                    {h}
+                  </button>
+                  <button onClick={()=>removeFromHistory(h)}
+                    style={{padding:'3px 8px 3px 2px',border:'none',background:'transparent',
+                      color:'var(--text-4)',fontSize:13,lineHeight:1,cursor:'pointer'}}>×</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <Label>日付</Label>
+        <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:8,flexDirection:bp==='mobile'?'column':'row'}}>
+          <input type="date" value={startKey} onChange={e=>setStartKey(e.target.value)}
+            style={{...inputStyle,marginBottom:0,flex:1,width:bp==='mobile'?'100%':'auto'}}/>
+          <span style={{color:'var(--text-4)',display:bp==='mobile'?'none':'inline'}}>→</span>
+          <input type="date" value={endKey} onChange={e=>setEndKey(e.target.value)}
+            style={{...inputStyle,marginBottom:0,flex:1,width:bp==='mobile'?'100%':'auto'}}/>
+        </div>
+        <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+          <label style={{display:'inline-flex',alignItems:'center',gap:6,cursor:'pointer',
+            padding:'6px 12px',borderRadius:7,border:`1.5px solid ${startPM?'var(--accent)':'var(--border)'}`,
+            background:startPM?'rgba(228,161,26,.08)':'var(--surface-2)',
+            fontSize:12,fontWeight:500,fontFamily:'var(--font-jp)',color:startPM?'var(--accent-2)':'var(--text-2)'}}>
+            <input type="checkbox" checked={startPM} onChange={e=>setStartPM(e.target.checked)}
+              style={{accentColor:'var(--accent)',cursor:'pointer'}}/>
+            開始：午後から（半日）
+          </label>
+          <label style={{display:'inline-flex',alignItems:'center',gap:6,cursor:'pointer',
+            padding:'6px 12px',borderRadius:7,border:`1.5px solid ${endAM?'var(--accent)':'var(--border)'}`,
+            background:endAM?'rgba(228,161,26,.08)':'var(--surface-2)',
+            fontSize:12,fontWeight:500,fontFamily:'var(--font-jp)',color:endAM?'var(--accent-2)':'var(--text-2)'}}>
+            <input type="checkbox" checked={endAM} onChange={e=>setEndAM(e.target.checked)}
+              style={{accentColor:'var(--accent)',cursor:'pointer'}}/>
+            終了：午前まで（半日）
+          </label>
+        </div>
+
+        <Label>工種</Label>
+        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:14}}>
+          {CATEGORIES.map(c=>(
+            <button key={c.id} onClick={()=>setColor(c.id)}
+              style={{padding:'7px 12px',borderRadius:7,border:color===c.id?`2px solid ${c.color}`:'1px solid var(--border)',
+                background:color===c.id?c.color:'var(--surface)',
+                color:color===c.id?'#fff':'var(--text-2)',
+                fontSize:12,fontWeight:600,fontFamily:'var(--font-jp)',cursor:'pointer'}}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+
+        <Label>メモ</Label>
+        <textarea value={memo} onChange={e=>setMemo(e.target.value)} placeholder="メモ（任意）"
+          style={{...inputStyle,minHeight:70,resize:'vertical',lineHeight:1.5}}/>
+
+        <div style={{display:'flex',gap:8,marginTop:10}}>
+          <button onClick={onClose}
+            style={{flex:1,height:46,background:'var(--surface-2)',color:'var(--text-2)',
+              border:'1px solid var(--border)',borderRadius:10,cursor:'pointer',
+              fontSize:14,fontWeight:600,fontFamily:'var(--font-jp)'}}>キャンセル</button>
+          <button onClick={handleSave}
+            style={{flex:2,height:46,background:'var(--accent)',color:'#fff',
+              border:'none',borderRadius:10,cursor:'pointer',
+              fontSize:14,fontWeight:700,fontFamily:'var(--font-jp)'}}>保存</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const inputStyle = {
+  width:'100%',padding:'10px 12px',borderRadius:8,border:'1px solid var(--border)',
+  background:'var(--surface-2)',color:'var(--text)',fontSize:13.5,outline:'none',
+  marginBottom:14,fontFamily:'var(--font-jp)',
+}
+const Label = ({children}) => (
+  <div style={{fontSize:10,fontWeight:600,color:'var(--text-3)',marginBottom:6,
+    letterSpacing:'.05em',textTransform:'uppercase',fontFamily:'var(--font-jp)'}}>{children}</div>
+)
+
+// ────────────────────────────────────────────────
+// Print Preview Bar
+// ────────────────────────────────────────────────
+function PrintPreviewBar({ onClose }) {
+  return (
+    <div className="preview-bar" style={{
+      position:'fixed',top:12,left:'50%',transform:'translateX(-50%)',zIndex:95,
+      display:'flex',alignItems:'center',gap:4,padding:4,background:'var(--text)',
+      color:'var(--surface)',borderRadius:10,boxShadow:'0 12px 32px rgba(0,0,0,.25)',
+      fontFamily:'var(--font-jp)',
+    }}>
+      <div style={{padding:'6px 12px',fontSize:12,fontWeight:500,display:'flex',alignItems:'center',gap:6}}>
+        <Icon name="print" size={14}/>印刷プレビュー
+      </div>
+      <div style={{width:1,height:18,background:'rgba(255,255,255,.15)'}}/>
+      <button onClick={()=>window.print()}
+        style={{padding:'6px 14px',background:'var(--accent)',color:'#fff',border:'none',borderRadius:6,
+          cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'var(--font-jp)',
+          display:'inline-flex',alignItems:'center',gap:6}}>
+        <Icon name="print" size={13}/>印刷する
+      </button>
+      <button onClick={onClose}
+        style={{padding:'6px 10px',background:'transparent',color:'rgba(255,255,255,.7)',
+          border:'none',borderRadius:6,cursor:'pointer',fontSize:12,fontWeight:500,
+          fontFamily:'var(--font-jp)',display:'inline-flex',alignItems:'center',gap:4}}>
+        <Icon name="close" size={13}/>閉じる
+      </button>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────
+// Print Header (visible only in print)
+// ────────────────────────────────────────────────
+function PrintHeader({ rangeStart, rangeDays, tasks, view }) {
+  const start = parseKey(rangeStart)
+  const end = addDays(start, rangeDays-1)
+  const now = new Date()
+  const pad = n => String(n).padStart(2,'0')
+  const stamp = `${now.getFullYear()}/${pad(now.getMonth()+1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`
+  const viewLabel = { gantt:'ガントチャート', calendar:'カレンダー', list:'タスクリスト', agenda:'アジェンダ' }[view] || '工程表'
+
+  return (
+    <div className="print-only" style={{
+      marginBottom:8,paddingBottom:8,borderBottom:'2px solid #000',
+      fontFamily:'var(--font-jp)',color:'#000',
+    }}>
+      <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:9,fontWeight:600,letterSpacing:'.08em',color:'#666',textTransform:'uppercase'}}>
+            Construction Schedule · {viewLabel}
+          </div>
+          <h1 style={{margin:'2px 0 4px',fontSize:16,fontWeight:700}}>工程表</h1>
+          <div style={{fontSize:10,color:'#333',display:'flex',gap:12}}>
+            <span><b>期間</b>: <span className="mono">{fmtMD(start)} – {fmtMD(end)}</span> ({rangeDays}日間)</span>
+            <span><b>件数</b>: {tasks.length}</span>
+          </div>
+        </div>
+        <div style={{textAlign:'right',fontSize:9,color:'#666'}}>
+          <div className="mono">{stamp} 出力</div>
+          <div style={{marginTop:2}}>{viewLabel}</div>
+        </div>
+      </div>
+      <div style={{marginTop:6,display:'flex',flexWrap:'wrap',gap:'4px 12px',fontSize:9,color:'#333'}}>
+        {CATEGORIES.map(c=>(
+          <span key={c.id} style={{display:'inline-flex',alignItems:'center',gap:4}}>
+            <span style={{width:8,height:8,background:c.color,borderRadius:2}}/>
+            {c.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────
+// App root
 // ────────────────────────────────────────────────
 export default function App() {
-  const [now] = useState(() => new Date())
-  const todayKey  = toKey(now)
-  const baseStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay())
-
-  const [tasks, setTasks]                     = useState([])
-  const [navOffset, setNavOffset]             = useState(0)
-  const [viewDays, setViewDays]               = useState(28)
-  const [currentTab, setCurrentTab]           = useState("schedule")
-  const [filterName, setFilterName]           = useState("")
-  const [filterColor, setFilterColor]         = useState("")
-  const [previewTask, setPreviewTask]         = useState(null)
-  const [modalOpen, setModalOpen]             = useState(false)
-  const [editId, setEditId]                   = useState(null)
-  const [selectedColor, setSelectedColor]     = useState("orange")
-  const [taskText, setTaskText]               = useState("")
-  const [companyInput, setCompanyInput]       = useState("")
-  const [personInput, setPersonInput]         = useState("")
-  const [memoInput, setMemoInput]             = useState("")
-  const [startDate, setStartDate]             = useState("")
-  const [endDate, setEndDate]                 = useState("")
-  const [toastMsg, setToastMsg]               = useState("")
-  
-  // 印刷用メモの状態
-  const [printMemos, setPrintMemos]           = useState([])
-  const [printViewDays, setPrintViewDays]     = useState(28)
-
-  // 担当者履歴をlocalStorageで永続化
-  const [assigneeHistory, setAssigneeHistory] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("kh_assignee_history") || "[]")
-    } catch { return [] }
+  const bp = useBreakpoint()
+  const [theme, setTheme] = useState(()=> localStorage.getItem('kh-theme') || 'light')
+  const [view, setView] = useState(()=> bp==='mobile' ? 'agenda' : 'gantt')
+  const [rangeStart, setRangeStart] = useState(()=> toKey(addDays(new Date(), -3)))
+  const [rangeDays, setRangeDays] = useState(()=> bp==='mobile' ? 14 : 28)
+  const [activeCats, setActiveCats] = useState([])
+  const [search, setSearch] = useState('')
+  const [searchExpanded, setSearchExpanded] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [selectedTask, setSelectedTask] = useState(null)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editTask, setEditTask] = useState(null)
+  const [printPreview, setPrintPreview] = useState(false)
+  const [tasks, setTasks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [assigneeHistory, setAssigneeHistory] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem('kh-assignee-history')||'[]') } catch { return [] }
   })
-  useEffect(() => {
-    localStorage.setItem("kh_assignee_history", JSON.stringify(assigneeHistory))
-  }, [assigneeHistory])
+  const [toastMsg, showToast] = useToast()
 
-  const taskTextRef     = useRef(null)
-  const suppressRTRef   = useRef(false)
-  const suppressTimerRef = useRef(null)
+  // Theme persistence
+  useEffect(()=>{
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('kh-theme', theme)
+  }, [theme])
 
-  // isMobileをstateで管理しリサイズに追従
-  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768)
-  useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth <= 768)
-    window.addEventListener("resize", handler)
-    return () => window.removeEventListener("resize", handler)
-  }, [])
+  // Print preview body class
+  useEffect(()=>{
+    if(printPreview) document.body.classList.add('kh-print-preview')
+    else document.body.classList.remove('kh-print-preview')
+  }, [printPreview])
 
-  useEffect(() => {
-    const style = document.createElement("style")
-    style.setAttribute("data-kh", "1")
-    style.textContent = CSS
-    document.head.appendChild(style)
-    return () => document.head.removeChild(style)
-  }, [])
+  // Esc to close print preview
+  useEffect(()=>{
+    if(!printPreview) return
+    const k = e => { if(e.key==='Escape') setPrintPreview(false) }
+    window.addEventListener('keydown', k)
+    return ()=> window.removeEventListener('keydown', k)
+  }, [printPreview])
 
-  // エラートースト表示ヘルパー
-  const showToast = useCallback((msg) => {
-    setToastMsg(msg)
-    setTimeout(() => setToastMsg(""), 3000)
-  }, [])
+  // Close drawer on desktop
+  useEffect(()=>{ if(bp==='desktop') setDrawerOpen(false) }, [bp])
 
-  // 印刷ハンドラー
-  const handlePrint = useCallback(() => {
-    window.print()
-  }, [])
-
-  const loadTasks = useCallback(async () => {
+  // Load tasks
+  const loadTasks = useCallback(async ()=>{
+    setLoading(true)
     try {
-      const { data, error } = await supabase.from("tasks").select("*").order("start_key")
-      if (error) {
-        console.error("データ取得エラー:", error)
-        showToast("データの取得に失敗しました")
-        return
-      }
-      if (data) {
-        setTasks(data.map(t => ({ ...t, done: t.done || false })))
-        console.log(`✅ ${data.length}件のタスクを読み込みました`)
-      }
-    } catch (err) {
-      console.error("予期しないエラー:", err)
-      showToast("データの取得中にエラーが発生しました")
-    }
+      const { data, error } = await supabase.from('tasks').select('*').order('start_key')
+      if(error){ console.error(error); showToast('データの取得に失敗しました'); return }
+      setTasks((data||[]).map(t=>({...t, done: t.done||false})))
+    } catch(e){
+      console.error(e); showToast('データの取得に失敗しました')
+    } finally { setLoading(false) }
   }, [showToast])
 
-  useEffect(() => {
-    loadTasks()
-    const channel = supabase
-      .channel("tasks-rt")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks" }, (payload) => {
-        console.log("🔔 新規タスク追加:", payload)
-        if (!suppressRTRef.current) loadTasks()
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks" }, ({ new: rec }) => {
-        console.log("🔔 タスク更新:", rec)
-        if (suppressRTRef.current) return
-        setTasks(prev => prev.map(t => t.id === rec.id ? { ...rec, done: rec.done || false } : t))
-        setPreviewTask(prev => prev && prev.id === rec.id ? { ...rec, done: rec.done || false } : prev)
-      })
-      .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks" }, ({ old: rec }) => {
-        console.log("🔔 タスク削除:", rec)
-        setTasks(prev => prev.filter(t => t.id !== rec.id))
-      })
+  useEffect(()=>{ loadTasks() }, [loadTasks])
+
+  // Realtime subscription
+  useEffect(()=>{
+    const ch = supabase.channel('tasks-changes')
+      .on('postgres_changes', { event:'*', schema:'public', table:'tasks' }, ()=> loadTasks())
       .subscribe()
-    return () => supabase.removeChannel(channel)
+    return ()=> supabase.removeChannel(ch)
   }, [loadTasks])
 
-  const toggleDone = useCallback(async (id) => {
-    const task = tasks.find(t => t.id === id)
-    if (!task) return
-    const newDone = !task.done
-    const prevDone = task.done
-    
-    // 楽観的更新
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: newDone } : t))
-    setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: newDone } : prev)
-    
+  // Toggle done (optimistic)
+  const toggleDone = useCallback(async (id, newDone)=>{
+    const prev = tasks.find(t=>t.id===id)?.done
+    setTasks(p => p.map(t=> t.id===id?{...t, done:newDone}:t))
+    setSelectedTask(p => p && p.id===id ? {...p, done:newDone} : p)
     try {
-      const { error } = await supabase.from("tasks").update({ done: newDone }).eq("id", id)
-      if (error) {
-        console.error("完了状態更新エラー:", error)
-        showToast("更新に失敗しました")
-        // ロールバック
-        setTasks(prev => prev.map(t => t.id === id ? { ...t, done: prevDone } : t))
-        setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: prevDone } : prev)
-      }
-    } catch (err) {
-      console.error("予期しないエラー:", err)
-      showToast("更新中にエラーが発生しました")
-      // ロールバック
-      setTasks(prev => prev.map(t => t.id === id ? { ...t, done: prevDone } : t))
-      setPreviewTask(prev => prev && prev.id === id ? { ...prev, done: prevDone } : prev)
+      const { error } = await supabase.from('tasks').update({done:newDone}).eq('id', id)
+      if(error) throw error
+    } catch(e){
+      showToast('更新に失敗しました')
+      setTasks(p => p.map(t=> t.id===id?{...t, done:prev}:t))
     }
   }, [tasks, showToast])
 
-  const openModal = useCallback((dateKey, task = null) => {
-    setEditId(task ? task.id : null)
-    setSelectedColor(task ? task.color : "orange")
-    setTaskText(task ? task.text : "")
-    setStartDate(task ? task.start_key : dateKey)
-    setEndDate(task ? task.end_key : dateKey)
-    const { company, person } = splitAssignee(task ? task.assignee : "")
-    setCompanyInput(company)
-    setPersonInput(person)
-    setMemoInput(task ? task.memo || "" : "")
-    setModalOpen(true)
-    setTimeout(() => taskTextRef.current?.focus(), 80)
-  }, [])
-
-  const closeModal = useCallback(() => setModalOpen(false), [])
-
-  const saveTask = useCallback(async () => {
-    const text = taskText.trim()
-    if (!text) {
-      showToast("作業内容を入力してください")
-      return
-    }
-    
-    const company  = companyInput.trim()
-    const person   = personInput.trim()
-    const assignee = assigneeLabel(company, person)
-
-    if (company || person) {
-      setAssigneeHistory(prev => {
-        const exists = prev.some(h => h.company === company && h.person === person)
-        return exists ? prev : [...prev, { company, person }]
-      })
-    }
-
-    // 既存タイマーをクリアしてから再セット
-    suppressRTRef.current = true
-    if (suppressTimerRef.current) {
-      clearTimeout(suppressTimerRef.current)
-    }
-
-    setModalOpen(false)
-
+  // Resize task (supports half-day fracs)
+  const resizeTask = useCallback(async (id, sk, ek, sFrac=0, eFrac=0)=>{
+    const prev = tasks.find(t=>t.id===id)
+    setTasks(p => p.map(t=> t.id===id?{...t, start_key:sk, end_key:ek, start_frac:sFrac, end_frac:eFrac}:t))
     try {
-      const memo = memoInput.trim() || null
-      if (editId) {
-        const { error } = await supabase.from("tasks")
-          .update({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, memo })
-          .eq("id", editId)
-        if (error) {
-          console.error("更新エラー:", error)
-          showToast("更新に失敗しました: " + error.message)
-          suppressRTRef.current = false
-          await loadTasks()
-          return
-        }
-        console.log("✅ タスクを更新しました:", editId)
+      const { error } = await supabase.from('tasks').update({
+        start_key:sk, end_key:ek, start_frac:sFrac, end_frac:eFrac
+      }).eq('id', id)
+      if(error) throw error
+    } catch(e){
+      console.error(e)
+      showToast('更新に失敗しました')
+      if(prev) setTasks(p => p.map(t=> t.id===id?prev:t))
+    }
+  }, [tasks, showToast])
+
+  // Move task (whole shift, used by calendar drag)
+  const moveTask = useCallback(async (id, sk, ek, sFrac=0, eFrac=0)=>{
+    const prev = tasks.find(t=>t.id===id)
+    setTasks(p => p.map(t=> t.id===id?{...t, start_key:sk, end_key:ek, start_frac:sFrac, end_frac:eFrac}:t))
+    try {
+      const { error } = await supabase.from('tasks').update({
+        start_key:sk, end_key:ek, start_frac:sFrac, end_frac:eFrac
+      }).eq('id', id)
+      if(error) throw error
+    } catch(e){
+      console.error(e)
+      showToast('更新に失敗しました')
+      if(prev) setTasks(p => p.map(t=> t.id===id?prev:t))
+    }
+  }, [tasks, showToast])
+
+  // Save (insert or update)
+  const saveTask = useCallback(async (payload)=>{
+    try {
+      if(payload.id){
+        const { error } = await supabase.from('tasks').update({
+          text:payload.text, assignee:payload.assignee,
+          start_key:payload.start_key, end_key:payload.end_key,
+          start_frac:payload.start_frac||0, end_frac:payload.end_frac||0,
+          color:payload.color, memo:payload.memo,
+        }).eq('id', payload.id)
+        if(error) throw error
       } else {
-        const { error } = await supabase.from("tasks")
-          .insert({ text, assignee, start_key: startDate, end_key: endDate, color: selectedColor, done: false, memo })
-        if (error) {
-          console.error("保存エラー:", error)
-          showToast("保存に失敗しました: " + error.message)
-          suppressRTRef.current = false
-          await loadTasks()
-          return
-        }
-        console.log("✅ タスクを追加しました")
+        const { error } = await supabase.from('tasks').insert({
+          text:payload.text, assignee:payload.assignee,
+          start_key:payload.start_key, end_key:payload.end_key,
+          start_frac:payload.start_frac||0, end_frac:payload.end_frac||0,
+          color:payload.color, memo:payload.memo, done:false,
+        })
+        if(error) throw error
       }
-
+      // Update assignee history
+      if(payload.assignee){
+        const nh = [payload.assignee, ...assigneeHistory.filter(h=>h!==payload.assignee)].slice(0,30)
+        setAssigneeHistory(nh)
+        localStorage.setItem('kh-assignee-history', JSON.stringify(nh))
+      }
+      setModalOpen(false); setEditTask(null)
       await loadTasks()
-
-      suppressTimerRef.current = setTimeout(() => {
-        suppressRTRef.current = false
-        console.log("✅ リアルタイム更新の抑制を解除しました")
-      }, 2000)
-    } catch (err) {
-      console.error("予期しないエラー:", err)
-      showToast("保存中にエラーが発生しました")
-      suppressRTRef.current = false
-      await loadTasks()
+    } catch(e){
+      console.error(e); showToast('保存に失敗しました: '+(e.message||''))
     }
-  }, [taskText, companyInput, personInput, memoInput, editId, startDate, endDate, selectedColor, loadTasks, showToast])
+  }, [assigneeHistory, loadTasks, showToast])
 
-  const resizeTask = useCallback(async (id, newStartKey, newEndKey) => {
-    setTasks(prev => prev.map(t => t.id === id ? {...t, start_key: newStartKey, end_key: newEndKey} : t))
+  // Delete
+  const deleteTask = useCallback(async (id)=>{
+    setTasks(p => p.filter(t=>t.id!==id))
+    setSelectedTask(p => p && p.id===id ? null : p)
+    setModalOpen(false); setEditTask(null)
     try {
-      const { error } = await supabase.from("tasks")
-        .update({ start_key: newStartKey, end_key: newEndKey })
-        .eq("id", id)
-      if (error) {
-        console.error("リサイズエラー:", error)
-        showToast("更新に失敗しました")
-        await loadTasks()
-      }
-    } catch (err) {
-      console.error("リサイズエラー:", err)
-      showToast("更新中にエラーが発生しました")
+      const { error } = await supabase.from('tasks').delete().eq('id', id)
+      if(error) throw error
+    } catch(e){
+      showToast('削除に失敗しました')
       await loadTasks()
     }
   }, [loadTasks, showToast])
 
-  const deleteTaskById = useCallback(async (id) => {
-    const prevTasks = tasks
-    setTasks(prev => prev.filter(t => t.id !== id))
-    setModalOpen(false)
-    setPreviewTask(null)
-    
-    try {
-      const { error } = await supabase.from("tasks").delete().eq("id", id)
-      if (error) {
-        console.error("削除エラー:", error)
-        showToast("削除に失敗しました")
-        setTasks(prevTasks)
-        await loadTasks()
-      } else {
-        console.log("✅ タスクを削除しました:", id)
+  const removeFromHistory = useCallback((name)=>{
+    const nh = assigneeHistory.filter(h=>h!==name)
+    setAssigneeHistory(nh)
+    localStorage.setItem('kh-assignee-history', JSON.stringify(nh))
+  }, [assigneeHistory])
+
+  // Filter tasks
+  const filteredTasks = useMemo(()=>{
+    const q = search.trim().toLowerCase()
+    return tasks.filter(t=>{
+      if(activeCats.length>0 && !activeCats.includes(t.color)) return false
+      if(q){
+        const hay = `${t.text||''} ${t.assignee||''} ${t.memo||''} ${catById(t.color).label}`.toLowerCase()
+        if(!hay.includes(q)) return false
       }
-    } catch (err) {
-      console.error("予期しないエラー:", err)
-      showToast("削除中にエラーが発生しました")
-      setTasks(prevTasks)
-      await loadTasks()
-    }
-  }, [tasks, loadTasks, showToast])
+      return true
+    })
+  }, [tasks, activeCats, search])
 
-  const base      = addDays(baseStart, navOffset * 7)
-  const colDates  = Array.from({ length: viewDays }, (_, i) => addDays(base, i))
-  const headerMonth = `${colDates[0].getMonth() + 1}月〜${colDates[viewDays - 1].getMonth() + 1}月 工程表`
-  const navLabel    = `${colDates[0].getMonth() + 1}/${colDates[0].getDate()} 〜 ${colDates[viewDays - 1].getMonth() + 1}/${colDates[viewDays - 1].getDate()}`
+  // View options
+  const viewOptions = bp==='mobile'
+    ? [
+        { id:'agenda',   icon:'agenda',   label:'アジェンダ' },
+        { id:'calendar', icon:'calendar', label:'カレンダー' },
+        { id:'gantt',    icon:'gantt',    label:'ガント' },
+        { id:'list',     icon:'list',     label:'リスト' },
+      ]
+    : [
+        { id:'gantt',    icon:'gantt',    label:'ガント' },
+        { id:'calendar', icon:'calendar', label:'カレンダー' },
+        { id:'agenda',   icon:'agenda',   label:'アジェンダ' },
+        { id:'list',     icon:'list',     label:'リスト' },
+      ]
 
-  const filteredTasks = tasks.filter(t => {
-    if (filterName  && !(t.assignee || "").includes(filterName)) return false
-    if (filterColor && t.color !== filterColor)                   return false
-    return true
-  })
-
-  const currentPreviewTask = previewTask
-    ? (tasks.find(t => t.id === previewTask.id) || previewTask)
-    : null
+  // Layout grid
+  const gridStyle = bp==='desktop' ? {
+    gridTemplateColumns:'228px 1fr',
+    gridTemplateRows:'52px 44px 1fr',
+    gridTemplateAreas:`"header header" "sidebar subheader" "sidebar main"`,
+  } : bp==='tablet' ? {
+    gridTemplateColumns:'1fr',
+    gridTemplateRows:'52px 44px 1fr',
+    gridTemplateAreas:`"header" "subheader" "main"`,
+  } : {
+    gridTemplateColumns:'1fr',
+    gridTemplateRows:'52px 44px 1fr 56px',
+    gridTemplateAreas:`"header" "subheader" "main" "tabbar"`,
+  }
 
   return (
-    <div style={{minHeight:"100vh",background:"#EDEAE3"}}>
-      <div className="kh-header">
-        <div>
-          <div className="kh-htitle">CONSTRUCTION SCHEDULE</div>
-          <div className="kh-hmonth">{headerMonth}</div>
-          <div className="kh-hmode">● LIVE</div>
-        </div>
-        {currentTab === "schedule" && (
-          <div className="kh-day-btns">
-            {[7, 14, 28].map(n => (
-              <button key={n} className="kh-day-btn"
-                style={{
-                  background: viewDays === n ? "#F5C200" : "rgba(255,255,255,0.15)",
-                  color: viewDays === n ? "#192536" : "#fff"
-                }}
-                onClick={() => setViewDays(n)}
-                aria-pressed={viewDays === n}>{n}日</button>
-            ))}
-          </div>
+    <>
+      <style>{CSS}</style>
+      <div style={{display:'grid',...gridStyle,height:'100%',width:'100%',background:'var(--bg)',overflow:'hidden'}}>
+        <PrintHeader rangeStart={rangeStart} rangeDays={rangeDays} tasks={filteredTasks} view={view}/>
+
+        <Header
+          bp={bp} view={view} setView={setView}
+          search={search} setSearch={setSearch}
+          onOpenDrawer={()=>setDrawerOpen(true)}
+          onAdd={()=>{ setEditTask(null); setModalOpen(true) }}
+          onPrint={()=>setPrintPreview(true)}
+          onToggleTheme={()=>setTheme(t=>t==='dark'?'light':'dark')}
+          theme={theme}
+          viewOptions={viewOptions}
+          searchExpanded={searchExpanded} setSearchExpanded={setSearchExpanded}
+        />
+
+        {bp==='desktop' && (
+          <Sidebar activeCats={activeCats} setActiveCats={setActiveCats} tasks={tasks}/>
         )}
-      </div>
-      <div className="kh-tabs">
-        {[
-          { id: "today",    label: "📅 今日" },
-          { id: "tomorrow", label: "📆 明日" },
-          { id: "schedule", label: "📋 工程表" },
-          { id: "print",    label: "🖨️ 印刷" }
-        ].map(tab => (
-          <button key={tab.id} className={`kh-tab${currentTab === tab.id ? " active" : ""}`}
-            onClick={() => {
-              console.log(`タブ切り替え: ${tab.id}`)
-              setCurrentTab(tab.id)
-            }}
-            aria-selected={currentTab === tab.id}
-            role="tab">{tab.label}</button>
-        ))}
-      </div>
-      <div className="kh-filter-bar">
-        <input placeholder="🏢 担当で絞り込み" value={filterName}
-          onChange={e => setFilterName(e.target.value)}
-          aria-label="担当で絞り込み"/>
-        <div className="kh-filter-chips">
-          {COLORS.map(c => (
-            <button key={c.id} className={`kh-chip${filterColor === c.id ? " active" : ""}`}
-              style={filterColor === c.id ? { background: c.bg } : {}}
-              onClick={() => setFilterColor(filterColor === c.id ? "" : c.id)}
-              aria-pressed={filterColor === c.id}>{c.label}</button>
-          ))}
-        </div>
-        <button className="kh-filter-clear"
-          onClick={() => { setFilterName(""); setFilterColor("") }}
-          aria-label="フィルタをクリア">✕ クリア</button>
-      </div>
+        <SidebarDrawer open={drawerOpen} onClose={()=>setDrawerOpen(false)}
+          activeCats={activeCats} setActiveCats={setActiveCats} tasks={tasks}/>
 
-      {currentTab === "today" && (
-        <DayView which="today" filteredTasks={filteredTasks}
-          toggleDone={toggleDone} setPreviewTask={setPreviewTask}
-          now={now} todayKey={todayKey}/>
-      )}
-      {currentTab === "tomorrow" && (
-        <DayView which="tomorrow" filteredTasks={filteredTasks}
-          toggleDone={toggleDone} setPreviewTask={setPreviewTask}
-          now={now} todayKey={todayKey}/>
-      )}
-      {currentTab === "schedule" && (
-        <ScheduleView
-          filteredTasks={filteredTasks} viewDays={viewDays} base={base}
-          navLabel={navLabel} colDates={colDates} isMobile={isMobile}
-          toggleDone={toggleDone} deleteTaskById={deleteTaskById}
-          setNavOffset={setNavOffset} openModal={openModal}
-          setPreviewTask={setPreviewTask} todayKey={todayKey}
-          resizeTask={resizeTask}/>
-      )}
-      {currentTab === "print" && (
-        <PrintTab
-          filteredTasks={filteredTasks} viewDays={printViewDays} base={base}
-          navLabel={navLabel} isMobile={isMobile}
-          toggleDone={toggleDone} deleteTaskById={deleteTaskById}
-          setNavOffset={setNavOffset} openModal={openModal}
-          setPreviewTask={setPreviewTask} todayKey={todayKey}
-          printViewDays={printViewDays} setPrintViewDays={setPrintViewDays}
-          printMemos={printMemos} setPrintMemos={setPrintMemos}/>
-      )}
+        <SubHeader rangeStart={rangeStart} setRangeStart={setRangeStart}
+          rangeDays={rangeDays} setRangeDays={setRangeDays} bp={bp}/>
 
-      {currentPreviewTask && (
-        <PreviewCard task={currentPreviewTask} onClose={() => setPreviewTask(null)}
-          toggleDone={toggleDone} openModal={openModal}/>
-      )}
-      {modalOpen && (
-        <EditModal
-          editId={editId} taskText={taskText} setTaskText={setTaskText}
-          companyInput={companyInput} setCompanyInput={setCompanyInput}
-          personInput={personInput} setPersonInput={setPersonInput}
-          memoInput={memoInput} setMemoInput={setMemoInput}
-          startDate={startDate} setStartDate={setStartDate}
-          endDate={endDate} setEndDate={setEndDate}
-          selectedColor={selectedColor} setSelectedColor={setSelectedColor}
-          assigneeHistory={assigneeHistory} setAssigneeHistory={setAssigneeHistory}
-          saveTask={saveTask} deleteTaskById={deleteTaskById}
-          closeModal={closeModal} taskTextRef={taskTextRef}/>
-      )}
+        <main style={{gridArea:'main',overflow:'hidden',position:'relative',background:'var(--bg)'}}>
+          {loading ? (
+            <div style={{padding:60,textAlign:'center',color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>読み込み中…</div>
+          ) : (
+            <>
+              {view==='gantt'    && <GanttView    tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} resizeTask={resizeTask} toggleDone={toggleDone}/>}
+              {view==='calendar' && <CalendarView tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone} moveTask={moveTask} onAddOn={(dateKey)=>{ setEditTask({ start_key:dateKey, end_key:dateKey }); setModalOpen(true) }}/>}
+              {view==='agenda'   && <AgendaView   tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone}/>}
+              {view==='list'     && <ListView     tasks={filteredTasks} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone} deleteTask={deleteTask}/>}
+            </>
+          )}
+        </main>
 
-      {toastMsg && <div className="kh-toast">⚠️ {toastMsg}</div>}
-      
-    </div>
+        {bp==='mobile' && <BottomTabBar view={view} setView={setView} options={viewOptions}/>}
+
+        {selectedTask && (
+          <TaskDetailPanel task={selectedTask} bp={bp}
+            onClose={()=>setSelectedTask(null)}
+            onEdit={t=>{setEditTask(t); setModalOpen(true); setSelectedTask(null)}}
+            onToggleDone={toggleDone} onDelete={deleteTask}/>
+        )}
+
+        <TaskEditModal open={modalOpen} editTask={editTask}
+          onClose={()=>{setModalOpen(false); setEditTask(null)}}
+          onSave={saveTask} onDelete={deleteTask}
+          assigneeHistory={assigneeHistory} removeFromHistory={removeFromHistory} bp={bp}/>
+
+        {printPreview && <PrintPreviewBar onClose={()=>setPrintPreview(false)}/>}
+
+        {toastMsg && <div className="kh-toast">{toastMsg}</div>}
+      </div>
+    </>
   )
 }

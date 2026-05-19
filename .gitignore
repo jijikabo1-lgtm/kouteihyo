@@ -36,3 +36,11 @@ Thumbs.db
 
 # Misc
 *.log
+.vercel
+
+# Backup files
+*.backup-original
+*.backup
+
+# Claude local settings (launch.json is OK to commit, local settings are not)
+.claude/settings.local.json
