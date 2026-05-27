@@ -25,15 +25,7 @@ const catById = id => {
 // カスタムカラー含めて「その他」グループに属するか判定（サイドバーフィルタ用）
 const effectiveCatId = color => (color && color.startsWith('#')) ? 'gray' : (color || 'gray')
 
-// Preset assignees (suggestions only — free input also allowed)
-const PRESET_ASSIGNEES = [
-  { company:"佐藤組",     role:"元請" },
-  { company:"田中電気",   role:"設備" },
-  { company:"鈴木鉄工",   role:"鉄骨" },
-  { company:"伊藤内装",   role:"内装" },
-  { company:"森設備",     role:"空調" },
-  { company:"加藤工務店", role:"建築" },
-]
+
 
 // ────────────────────────────────────────────────
 // Date helpers
@@ -1544,26 +1536,12 @@ function TaskEditModal({ open, editTask, onClose, onSave, onDelete, assigneeHist
 
         <Label>担当（会社・氏名）</Label>
         <div style={{display:'flex',gap:8,marginBottom:8}}>
-          <input value={company} onChange={e=>setCompany(e.target.value)} placeholder="会社名" list="kh-companies"
+          <input value={company} onChange={e=>setCompany(e.target.value)} placeholder="会社名"
             style={{...inputStyle,marginBottom:0,flex:1}}/>
           <input value={person} onChange={e=>setPerson(e.target.value)} placeholder="氏名"
             style={{...inputStyle,marginBottom:0,flex:1}}/>
         </div>
-        <datalist id="kh-companies">
-          {PRESET_ASSIGNEES.map(a => <option key={a.company} value={a.company}>{a.role}</option>)}
-        </datalist>
 
-        {/* preset chips */}
-        <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:8}}>
-          {PRESET_ASSIGNEES.map(a=>(
-            <button key={a.company} onClick={()=>setCompany(a.company)}
-              style={{padding:'3px 9px',borderRadius:20,border:'1px solid var(--border)',
-                background:'var(--surface-2)',color:'var(--text-2)',fontSize:11,fontWeight:500,
-                fontFamily:'var(--font-jp)',cursor:'pointer'}}>
-              {a.company} <span style={{color:'var(--text-4)'}}>· {a.role}</span>
-            </button>
-          ))}
-        </div>
 
         {assigneeHistory.length>0 && (
           <>
