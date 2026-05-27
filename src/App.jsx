@@ -1725,7 +1725,7 @@ function PrintHeader({ rangeStart, rangeDays, tasks, view }) {
   const now = new Date()
   const pad = n => String(n).padStart(2,'0')
   const stamp = `${now.getFullYear()}/${pad(now.getMonth()+1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`
-  const viewLabel = { gantt:'ガントチャート', calendar:'カレンダー', list:'タスクリスト', agenda:'アジェンダ' }[view] || '工程表'
+  const viewLabel = { gantt:'ガントチャート', calendar:'カレンダー', list:'タスクリスト' }[view] || '工程表'
 
   return (
     <div className="print-only" style={{
@@ -1994,7 +1994,7 @@ function ProjectsScreen({ bp, projects, loading, onCreate, onEnter, onDelete }) 
 export default function App() {
   const bp = useBreakpoint()
   const [theme, setTheme] = useState(()=> localStorage.getItem('kh-theme') || 'light')
-  const [view, setView] = useState(()=> bp==='mobile' ? 'agenda' : 'gantt')
+  const [view, setView] = useState('calendar')
   const [rangeStart, setRangeStart] = useState(()=> toKey(addDays(new Date(), -3)))
   const [rangeDays, setRangeDays] = useState(()=> bp==='mobile' ? 14 : 28)
   const [activeCats, setActiveCats] = useState([])
@@ -2229,19 +2229,11 @@ export default function App() {
   }, [tasks, activeCats, search])
 
   // View options
-  const viewOptions = bp==='mobile'
-    ? [
-        { id:'agenda',   icon:'agenda',   label:'アジェンダ' },
-        { id:'calendar', icon:'calendar', label:'カレンダー' },
-        { id:'gantt',    icon:'gantt',    label:'ガント' },
-        { id:'list',     icon:'list',     label:'リスト' },
-      ]
-    : [
-        { id:'gantt',    icon:'gantt',    label:'ガント' },
-        { id:'calendar', icon:'calendar', label:'カレンダー' },
-        { id:'agenda',   icon:'agenda',   label:'アジェンダ' },
-        { id:'list',     icon:'list',     label:'リスト' },
-      ]
+  const viewOptions = [
+    { id:'calendar', icon:'calendar', label:'カレンダー' },
+    { id:'gantt',    icon:'gantt',    label:'ガント' },
+    { id:'list',     icon:'list',     label:'リスト' },
+  ]
 
   // Enter / leave project
   const enterProject = useCallback((id)=>{
@@ -2353,7 +2345,6 @@ export default function App() {
             <>
               {view==='gantt'    && <GanttView    tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} resizeTask={resizeTask} toggleDone={toggleDone}/>}
               {view==='calendar' && <CalendarView tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone} moveTask={moveTask} onAddOn={(dateKey)=>{ setEditTask({ start_key:dateKey, end_key:dateKey }); setModalOpen(true) }}/>}
-              {view==='agenda'   && <AgendaView   tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone}/>}
               {view==='list'     && <ListView     tasks={filteredTasks} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone} deleteTask={deleteTask}/>}
             </>
           )}
