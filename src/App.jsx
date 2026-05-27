@@ -271,7 +271,7 @@ function IconButton({ icon, label, onClick, primary, active, size=32, title }) {
 // ────────────────────────────────────────────────
 // Header
 // ────────────────────────────────────────────────
-function Header({ bp, view, setView, search, setSearch, onOpenDrawer, onAdd, onPrint, onToggleTheme, theme, viewOptions, searchExpanded, setSearchExpanded }) {
+function Header({ bp, view, setView, search, setSearch, onOpenDrawer, onAdd, onPrint, onToggleTheme, theme, viewOptions, searchExpanded, setSearchExpanded, currentProject, onBack }) {
   return (
     <header style={{
       gridArea:'header',display:'flex',alignItems:'center',
@@ -279,24 +279,52 @@ function Header({ bp, view, setView, search, setSearch, onOpenDrawer, onAdd, onP
       background:'var(--surface)',borderBottom:'1px solid var(--border)',
       gap:bp==='mobile'?8:14,height:bp==='mobile'?52:52,flexShrink:0,
     }}>
-      {bp!=='desktop' && (
+      {bp!=='desktop' && !currentProject && (
         <IconButton icon="menu" onClick={onOpenDrawer} title="メニュー"/>
       )}
 
       {!searchExpanded && (
-        <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0,flex:1}}>
-          <div style={{width:28,height:28,borderRadius:6,background:'var(--text)',color:'var(--surface)',
-            display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,
-            fontFamily:'var(--font-jp)',flexShrink:0}}>工</div>
-          <div style={{display:'flex',flexDirection:'column',gap:1,minWidth:0,flex:1}}>
-            <span style={{fontSize:bp==='mobile'?13:13.5,fontWeight:600,fontFamily:'var(--font-jp)',
-              whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>工程表</span>
-            <span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:10.5,color:'#1F8A5B'}}>
-              <span style={{width:6,height:6,borderRadius:'50%',background:'#1F8A5B',
-                boxShadow:'0 0 0 3px rgba(31,138,91,.15)',animation:'pulse 2s infinite'}}/>
-              LIVE
-            </span>
-          </div>
+        <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0,flex:1}}>
+          {currentProject ? (
+            <>
+              <button onClick={onBack}
+                style={{display:'inline-flex',alignItems:'center',gap:3,height:30,padding:'0 8px',
+                  background:'transparent',border:'1px solid var(--border)',borderRadius:6,cursor:'pointer',
+                  color:'var(--text-2)',fontSize:12,fontFamily:'var(--font-jp)',flexShrink:0,
+                  transition:'all .12s ease'}}
+                onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <Icon name="chevL" size={13}/>
+                {bp!=='mobile' && '一覧'}
+              </button>
+              <div style={{width:1,height:20,background:'var(--border)',flexShrink:0}}/>
+              <div style={{width:28,height:28,borderRadius:6,background:'var(--accent)',color:'#fff',
+                display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,
+                fontFamily:'var(--font-jp)',flexShrink:0}}>工</div>
+              <div style={{display:'flex',flexDirection:'column',gap:0,minWidth:0,flex:1}}>
+                <span style={{fontSize:bp==='mobile'?13:13.5,fontWeight:600,fontFamily:'var(--font-jp)',
+                  whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{currentProject.name}</span>
+                {currentProject.code && (
+                  <span style={{fontSize:10,color:'var(--text-3)',fontFamily:'var(--font-mono)',letterSpacing:'.04em'}}>{currentProject.code}</span>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{width:28,height:28,borderRadius:6,background:'var(--text)',color:'var(--surface)',
+                display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,
+                fontFamily:'var(--font-jp)',flexShrink:0}}>工</div>
+              <div style={{display:'flex',flexDirection:'column',gap:1,minWidth:0,flex:1}}>
+                <span style={{fontSize:bp==='mobile'?13:13.5,fontWeight:600,fontFamily:'var(--font-jp)',
+                  whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>工程表</span>
+                <span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:10.5,color:'#1F8A5B'}}>
+                  <span style={{width:6,height:6,borderRadius:'50%',background:'#1F8A5B',
+                    boxShadow:'0 0 0 3px rgba(31,138,91,.15)',animation:'pulse 2s infinite'}}/>
+                  LIVE
+                </span>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1733,6 +1761,234 @@ function PrintHeader({ rangeStart, rangeDays, tasks, view }) {
 }
 
 // ────────────────────────────────────────────────
+// ProjectCreateModal
+// ────────────────────────────────────────────────
+function ProjectCreateModal({ open, onClose, onSave }) {
+  const [name, setName] = useState('')
+  const [code, setCode] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(()=>{
+    if(open){ setName(''); setCode('') }
+  }, [open])
+
+  if(!open) return null
+
+  const handleSave = async () => {
+    if(!name.trim()) return
+    setSaving(true)
+    await onSave({ name: name.trim(), code: code.trim() || null })
+    setSaving(false)
+  }
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:900,
+      display:'flex',alignItems:'center',justifyContent:'center'}}
+      onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
+      <div style={{background:'var(--surface)',borderRadius:12,padding:24,width:360,maxWidth:'90vw',
+        boxShadow:'var(--shadow-lg)',animation:'slideUp .18s ease'}}>
+        <div style={{fontSize:15,fontWeight:600,fontFamily:'var(--font-jp)',marginBottom:20}}>新規現場を追加</div>
+
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--text-3)',fontFamily:'var(--font-jp)',
+            textTransform:'uppercase',letterSpacing:'.06em',marginBottom:5}}>現場名 <span style={{color:'#D42020'}}>*</span></div>
+          <input
+            autoFocus value={name} onChange={e=>setName(e.target.value)}
+            onKeyDown={e=>{ if(e.key==='Enter') handleSave() }}
+            placeholder="例：○○マンション新築工事"
+            style={{width:'100%',height:36,padding:'0 10px',background:'var(--surface-2)',
+              border:'1px solid var(--border)',borderRadius:7,fontSize:13,color:'var(--text)',
+              fontFamily:'var(--font-jp)',outline:'none'}}
+            onFocus={e=>e.currentTarget.style.borderColor='var(--accent)'}
+            onBlur={e=>e.currentTarget.style.borderColor='var(--border)'}/>
+        </div>
+
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--text-3)',fontFamily:'var(--font-jp)',
+            textTransform:'uppercase',letterSpacing:'.06em',marginBottom:5}}>現場コード（任意）</div>
+          <input
+            value={code} onChange={e=>setCode(e.target.value)}
+            onKeyDown={e=>{ if(e.key==='Enter') handleSave() }}
+            placeholder="例：2024-A01"
+            style={{width:'100%',height:36,padding:'0 10px',background:'var(--surface-2)',
+              border:'1px solid var(--border)',borderRadius:7,fontSize:13,color:'var(--text)',
+              fontFamily:'var(--font-mono)',outline:'none'}}
+            onFocus={e=>e.currentTarget.style.borderColor='var(--accent)'}
+            onBlur={e=>e.currentTarget.style.borderColor='var(--border)'}/>
+        </div>
+
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <button onClick={onClose}
+            style={{height:34,padding:'0 16px',background:'var(--surface-2)',
+              border:'1px solid var(--border)',borderRadius:7,cursor:'pointer',
+              fontSize:13,fontFamily:'var(--font-jp)',color:'var(--text-2)'}}>
+            キャンセル
+          </button>
+          <button onClick={handleSave} disabled={!name.trim()||saving}
+            style={{height:34,padding:'0 18px',background:'var(--accent)',
+              border:'1px solid var(--accent-2)',borderRadius:7,cursor:'pointer',
+              fontSize:13,fontFamily:'var(--font-jp)',color:'#fff',fontWeight:600,
+              opacity: (!name.trim()||saving)?0.5:1}}>
+            {saving ? '保存中…' : '追加'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────
+// ProjectCard
+// ────────────────────────────────────────────────
+function ProjectCard({ project, onEnter, onDelete }) {
+  const [showMenu, setShowMenu] = useState(false)
+  const pct = Math.round((project.doneCount||0)/Math.max(1,project.taskCount||0)*100)
+  const menuRef = useRef(null)
+
+  useEffect(()=>{
+    if(!showMenu) return
+    const h = e => { if(menuRef.current && !menuRef.current.contains(e.target)) setShowMenu(false) }
+    document.addEventListener('mousedown', h)
+    return ()=> document.removeEventListener('mousedown', h)
+  }, [showMenu])
+
+  return (
+    <div
+      onClick={onEnter}
+      style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,
+        padding:'16px 18px',cursor:'pointer',position:'relative',
+        transition:'box-shadow .15s ease, border-color .15s ease',
+        boxShadow:'var(--shadow-sm)'}}
+      onMouseEnter={e=>{ e.currentTarget.style.boxShadow='var(--shadow)'; e.currentTarget.style.borderColor='var(--border-2)' }}
+      onMouseLeave={e=>{ e.currentTarget.style.boxShadow='var(--shadow-sm)'; e.currentTarget.style.borderColor='var(--border)' }}>
+
+      {/* Header row */}
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:10}}>
+        <div style={{minWidth:0,flex:1,paddingRight:8}}>
+          <div style={{fontSize:14,fontWeight:600,fontFamily:'var(--font-jp)',color:'var(--text)',
+            whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',marginBottom:2}}>
+            {project.name}
+          </div>
+          {project.code && (
+            <div style={{fontSize:11,color:'var(--text-3)',fontFamily:'var(--font-mono)',letterSpacing:'.04em'}}>
+              {project.code}
+            </div>
+          )}
+        </div>
+        {/* 3-dot menu */}
+        <div ref={menuRef} style={{position:'relative',flexShrink:0}} onClick={e=>e.stopPropagation()}>
+          <button onClick={e=>{ e.stopPropagation(); setShowMenu(s=>!s) }}
+            style={{width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',
+              background:'transparent',border:'none',borderRadius:5,cursor:'pointer',
+              color:'var(--text-3)',fontSize:16,lineHeight:1}}>⋯</button>
+          {showMenu && (
+            <div style={{position:'absolute',right:0,top:30,background:'var(--surface)',
+              border:'1px solid var(--border)',borderRadius:8,boxShadow:'var(--shadow-lg)',
+              overflow:'hidden',minWidth:110,zIndex:100}}>
+              <button onClick={()=>{ setShowMenu(false); onEnter() }}
+                style={{display:'block',width:'100%',padding:'8px 14px',textAlign:'left',
+                  background:'transparent',border:'none',cursor:'pointer',
+                  fontSize:12,fontFamily:'var(--font-jp)',color:'var(--text)'}}>
+                開く
+              </button>
+              <button onClick={()=>{ setShowMenu(false); onDelete(project.id) }}
+                style={{display:'block',width:'100%',padding:'8px 14px',textAlign:'left',
+                  background:'transparent',border:'none',cursor:'pointer',
+                  fontSize:12,fontFamily:'var(--font-jp)',color:'#D42020'}}>
+                削除
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{height:4,borderRadius:2,background:'var(--surface-3)',overflow:'hidden',marginBottom:8}}>
+        <div style={{height:'100%',width:`${pct}%`,background:'#1F8A5B',
+          transition:'width .3s ease',borderRadius:2}}/>
+      </div>
+
+      {/* Stats row */}
+      <div style={{display:'flex',alignItems:'center',gap:8}}>
+        <span className="mono num" style={{fontSize:18,fontWeight:600,color:'var(--text)',lineHeight:1}}>{pct}</span>
+        <span style={{fontSize:11,color:'var(--text-3)'}}>%</span>
+        <span style={{fontSize:11,color:'var(--text-3)',fontFamily:'var(--font-jp)',marginLeft:4}}>
+          {project.doneCount||0}/{project.taskCount||0} タスク完了
+        </span>
+        <span style={{marginLeft:'auto',fontSize:10.5,color:'var(--text-4)',fontFamily:'var(--font-jp)'}}>
+          {new Date(project.created_at).toLocaleDateString('ja-JP',{month:'short',day:'numeric'})}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────
+// ProjectsScreen
+// ────────────────────────────────────────────────
+function ProjectsScreen({ bp, projects, loading, onCreate, onEnter, onDelete }) {
+  return (
+    <div style={{height:'100%',overflow:'auto',background:'var(--bg)'}}>
+      <div style={{maxWidth:900,margin:'0 auto',padding: bp==='mobile'?'24px 16px':'40px 32px'}}>
+        {/* Page header */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:28}}>
+          <div>
+            <h1 style={{fontSize:bp==='mobile'?18:22,fontWeight:700,fontFamily:'var(--font-jp)',
+              color:'var(--text)',marginBottom:4}}>現場一覧</h1>
+            <p style={{fontSize:12,color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>
+              現場を選んで工程表を管理する
+            </p>
+          </div>
+          <button onClick={onCreate}
+            style={{display:'inline-flex',alignItems:'center',gap:6,height:36,padding:'0 16px',
+              background:'var(--accent)',border:'1px solid var(--accent-2)',borderRadius:8,
+              cursor:'pointer',fontSize:13,fontFamily:'var(--font-jp)',color:'#fff',fontWeight:600,
+              boxShadow:'var(--shadow-sm)'}}>
+            <Icon name="plus" size={14}/>
+            {bp!=='mobile' && '新規現場を追加'}
+          </button>
+        </div>
+
+        {loading ? (
+          <div style={{padding:60,textAlign:'center',color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>読み込み中…</div>
+        ) : projects.length === 0 ? (
+          <div style={{textAlign:'center',padding:'80px 20px'}}>
+            <div style={{fontSize:40,marginBottom:16}}>🏗</div>
+            <div style={{fontSize:15,fontWeight:600,fontFamily:'var(--font-jp)',color:'var(--text)',marginBottom:8}}>
+              まだ現場がありません
+            </div>
+            <div style={{fontSize:13,color:'var(--text-3)',fontFamily:'var(--font-jp)',marginBottom:24}}>
+              「新規現場を追加」から現場を作成してください
+            </div>
+            <button onClick={onCreate}
+              style={{display:'inline-flex',alignItems:'center',gap:6,height:38,padding:'0 20px',
+                background:'var(--accent)',border:'1px solid var(--accent-2)',borderRadius:8,
+                cursor:'pointer',fontSize:13,fontFamily:'var(--font-jp)',color:'#fff',fontWeight:600}}>
+              <Icon name="plus" size={14}/>
+              新規現場を追加
+            </button>
+          </div>
+        ) : (
+          <div style={{
+            display:'grid',
+            gridTemplateColumns: bp==='mobile'?'1fr': bp==='tablet'?'repeat(2,1fr)':'repeat(3,1fr)',
+            gap: bp==='mobile'?12:16
+          }}>
+            {projects.map(p=>(
+              <ProjectCard
+                key={p.id}
+                project={p}
+                onEnter={()=>onEnter(p.id)}
+                onDelete={onDelete}/>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────
 // App root
 // ────────────────────────────────────────────────
 export default function App() {
@@ -1755,6 +2011,12 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem('kh-assignee-history')||'[]') } catch { return [] }
   })
   const [toastMsg, showToast] = useToast()
+
+  // Projects state
+  const [projects, setProjects] = useState([])
+  const [projectsLoading, setProjectsLoading] = useState(true)
+  const [currentProjectId, setCurrentProjectId] = useState(null)
+  const [projectModalOpen, setProjectModalOpen] = useState(false)
 
   // Theme persistence
   useEffect(()=>{
@@ -1779,27 +2041,79 @@ export default function App() {
   // Close drawer on desktop
   useEffect(()=>{ if(bp==='desktop') setDrawerOpen(false) }, [bp])
 
-  // Load tasks
+  // Load projects (with task counts)
+  const loadProjects = useCallback(async ()=>{
+    setProjectsLoading(true)
+    try {
+      const { data: projs, error } = await supabase.from('projects').select('*').order('created_at', { ascending:false })
+      if(error) throw error
+      // Load task counts
+      const { data: counts } = await supabase.from('tasks').select('project_id, done')
+      const cMap={}, dMap={}
+      ;(counts||[]).forEach(t=>{
+        if(!t.project_id) return
+        cMap[t.project_id]=(cMap[t.project_id]||0)+1
+        if(t.done) dMap[t.project_id]=(dMap[t.project_id]||0)+1
+      })
+      setProjects((projs||[]).map(p=>({...p, taskCount:cMap[p.id]||0, doneCount:dMap[p.id]||0})))
+    } catch(e){
+      console.error(e); showToast('現場データの取得に失敗しました')
+    } finally { setProjectsLoading(false) }
+  }, [showToast])
+
+  useEffect(()=>{ loadProjects() }, [loadProjects])
+
+  // Save project (insert)
+  const saveProject = useCallback(async (payload)=>{
+    try {
+      const { error } = await supabase.from('projects').insert({
+        name: payload.name, code: payload.code || null
+      })
+      if(error) throw error
+      setProjectModalOpen(false)
+      await loadProjects()
+    } catch(e){
+      console.error(e); showToast('現場の保存に失敗しました: '+(e.message||''))
+    }
+  }, [loadProjects, showToast])
+
+  // Delete project
+  const deleteProject = useCallback(async (id)=>{
+    if(!window.confirm('この現場とすべての工程データを削除しますか？\nこの操作は元に戻せません。')) return
+    try {
+      const { error } = await supabase.from('projects').delete().eq('id', id)
+      if(error) throw error
+      await loadProjects()
+    } catch(e){
+      console.error(e); showToast('削除に失敗しました')
+    }
+  }, [loadProjects, showToast])
+
+  // Load tasks (scoped to current project)
   const loadTasks = useCallback(async ()=>{
+    if(!currentProjectId) return
     setLoading(true)
     try {
-      const { data, error } = await supabase.from('tasks').select('*').order('start_key')
+      const { data, error } = await supabase.from('tasks').select('*')
+        .eq('project_id', currentProjectId).order('start_key')
       if(error){ console.error(error); showToast('データの取得に失敗しました'); return }
       setTasks((data||[]).map(t=>({...t, done: t.done||false})))
     } catch(e){
       console.error(e); showToast('データの取得に失敗しました')
     } finally { setLoading(false) }
-  }, [showToast])
+  }, [showToast, currentProjectId])
 
   useEffect(()=>{ loadTasks() }, [loadTasks])
 
-  // Realtime subscription
+  // Realtime subscription (scoped to current project)
   useEffect(()=>{
-    const ch = supabase.channel('tasks-changes')
-      .on('postgres_changes', { event:'*', schema:'public', table:'tasks' }, ()=> loadTasks())
+    if(!currentProjectId) return
+    const ch = supabase.channel(`tasks-changes-${currentProjectId}`)
+      .on('postgres_changes', { event:'*', schema:'public', table:'tasks',
+        filter:`project_id=eq.${currentProjectId}` }, ()=> loadTasks())
       .subscribe()
     return ()=> supabase.removeChannel(ch)
-  }, [loadTasks])
+  }, [loadTasks, currentProjectId])
 
   // Toggle done (optimistic)
   const toggleDone = useCallback(async (id, newDone)=>{
@@ -1864,6 +2178,7 @@ export default function App() {
           start_key:payload.start_key, end_key:payload.end_key,
           start_frac:payload.start_frac||0, end_frac:payload.end_frac||0,
           color:payload.color, memo:payload.memo, done:false,
+          project_id: currentProjectId,
         })
         if(error) throw error
       }
@@ -1878,7 +2193,7 @@ export default function App() {
     } catch(e){
       console.error(e); showToast('保存に失敗しました: '+(e.message||''))
     }
-  }, [assigneeHistory, loadTasks, showToast])
+  }, [assigneeHistory, loadTasks, showToast, currentProjectId])
 
   // Delete
   const deleteTask = useCallback(async (id)=>{
@@ -1928,6 +2243,24 @@ export default function App() {
         { id:'list',     icon:'list',     label:'リスト' },
       ]
 
+  // Enter / leave project
+  const enterProject = useCallback((id)=>{
+    setCurrentProjectId(id)
+    setTasks([])
+    setSelectedTask(null)
+  }, [])
+
+  const backToProjects = useCallback(()=>{
+    setCurrentProjectId(null)
+    setTasks([])
+    setSelectedTask(null)
+    setDrawerOpen(false)
+    loadProjects()
+  }, [loadProjects])
+
+  // Current project object
+  const currentProject = useMemo(()=> projects.find(p=>p.id===currentProjectId)||null, [projects, currentProjectId])
+
   // Layout grid
   const gridStyle = bp==='desktop' ? {
     gridTemplateColumns:'228px 1fr',
@@ -1943,6 +2276,47 @@ export default function App() {
     gridTemplateAreas:`"header" "subheader" "main" "tabbar"`,
   }
 
+  // ── Projects screen (no project selected) ──
+  if(currentProjectId === null) {
+    return (
+      <>
+        <style>{CSS}</style>
+        <div style={{display:'grid',gridTemplateRows:'52px 1fr',height:'100%',width:'100%',
+          background:'var(--bg)',overflow:'hidden'}}>
+          {/* Minimal header for projects screen */}
+          <header style={{display:'flex',alignItems:'center',
+            padding:bp==='mobile'?'0 12px':'0 20px',
+            background:'var(--surface)',borderBottom:'1px solid var(--border)',
+            gap:14,height:52,flexShrink:0}}>
+            <div style={{width:28,height:28,borderRadius:6,background:'var(--text)',color:'var(--surface)',
+              display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,
+              fontFamily:'var(--font-jp)',flexShrink:0}}>工</div>
+            <span style={{fontSize:14,fontWeight:600,fontFamily:'var(--font-jp)',color:'var(--text)',flex:1}}>工程表</span>
+            <IconButton icon={theme==='dark'?'sun':'moon'}
+              onClick={()=>setTheme(t=>t==='dark'?'light':'dark')}
+              title={theme==='dark'?'ライトモード':'ダークモード'}/>
+          </header>
+
+          <ProjectsScreen
+            bp={bp}
+            projects={projects}
+            loading={projectsLoading}
+            onCreate={()=>setProjectModalOpen(true)}
+            onEnter={enterProject}
+            onDelete={deleteProject}/>
+        </div>
+
+        <ProjectCreateModal
+          open={projectModalOpen}
+          onClose={()=>setProjectModalOpen(false)}
+          onSave={saveProject}/>
+
+        {toastMsg && <div className="kh-toast">{toastMsg}</div>}
+      </>
+    )
+  }
+
+  // ── Task screen (project selected) ──
   return (
     <>
       <style>{CSS}</style>
@@ -1959,6 +2333,8 @@ export default function App() {
           theme={theme}
           viewOptions={viewOptions}
           searchExpanded={searchExpanded} setSearchExpanded={setSearchExpanded}
+          currentProject={currentProject}
+          onBack={backToProjects}
         />
 
         {bp==='desktop' && (
