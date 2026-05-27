@@ -7,17 +7,23 @@ import html2canvas from "html2canvas"
 // ────────────────────────────────────────────────
 const DAYS_JA = ["日","月","火","水","木","金","土"]
 
-// Category list — derived from existing color system to preserve compatibility
+// Category list
 const CATEGORIES = [
-  { id:"orange", label:"構造",   en:"Structure",  color:"#C7522A" },
-  { id:"blue",   label:"設備",   en:"Equipment",  color:"#3B6FB0" },
-  { id:"green",  label:"内装",   en:"Interior",   color:"#4F8E5C" },
-  { id:"red",    label:"検査",   en:"Inspection", color:"#B53A3A" },
-  { id:"yellow", label:"定例",   en:"Meeting",    color:"#C99A2E" },
-  { id:"purple", label:"搬入",   en:"Delivery",   color:"#7B5BA8" },
-  { id:"gray",   label:"その他", en:"Other",      color:"#6B7280" },
+  { id:"green",  label:"建築",   en:"Architecture", color:"#3D8A4F" },
+  { id:"yellow", label:"電気",   en:"Electrical",   color:"#B8960C" },
+  { id:"blue",   label:"設備",   en:"Facility",     color:"#3B6FB0" },
+  { id:"purple", label:"搬入",   en:"Delivery",     color:"#7B5BA8" },
+  { id:"red",    label:"検査",   en:"Inspection",   color:"#B53A3A" },
+  { id:"orange", label:"イベント",en:"Event",        color:"#D07030" },
+  { id:"gray",   label:"その他", en:"Other",        color:"#6B7280" },
 ]
-const catById = id => CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length-1]
+// HEXカラー（その他カスタム）にも対応: color が "#..." の場合はその他カテゴリ扱いだが色はそのまま使う
+const catById = id => {
+  if(id && id.startsWith('#')) return { ...CATEGORIES[CATEGORIES.length-1], color: id }
+  return CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length-1]
+}
+// カスタムカラー含めて「その他」グループに属するか判定（サイドバーフィルタ用）
+const effectiveCatId = color => (color && color.startsWith('#')) ? 'gray' : (color || 'gray')
 
 // Preset assignees (suggestions only — free input also allowed)
 const PRESET_ASSIGNEES = [
@@ -377,7 +383,8 @@ function SidebarContent({ activeCats, setActiveCats, tasks, onClose }) {
   const toggleCat = id => setActiveCats(s => s.includes(id) ? s.filter(c=>c!==id) : [...s,id])
   const catCounts = useMemo(()=>{
     const m={}
-    tasks.forEach(t=>{ m[t.color]=(m[t.color]||0)+1 })
+    // HEXカラーのタスクは「その他」(gray)にカウント
+    tasks.forEach(t=>{ const k=effectiveCatId(t.color); m[k]=(m[k]||0)+1 })
     return m
   }, [tasks])
 
@@ -1434,7 +1441,7 @@ function TaskEditModal({ open, editTask, onClose, onSave, onDelete, assigneeHist
   const [endKey, setEndKey] = useState('')
   const [startPM, setStartPM] = useState(false)  // 開始: 午後から (start_frac=0.5)
   const [endAM, setEndAM] = useState(false)      // 終了: 午前まで (end_frac=0.5)
-  const [color, setColor] = useState('orange')
+  const [color, setColor] = useState('green')
   const [memo, setMemo] = useState('')
 
   useEffect(()=>{
@@ -1447,7 +1454,7 @@ function TaskEditModal({ open, editTask, onClose, onSave, onDelete, assigneeHist
       setEndKey(editTask.end_key||'')
       setStartPM((editTask.start_frac||0) >= 0.5)
       setEndAM((editTask.end_frac||0) >= 0.5)
-      setColor(editTask.color||'orange')
+      setColor(editTask.color||'green')
       setMemo(editTask.memo||'')
     } else if(open){
       // New task — optionally pre-filled with date from calendar cell click
@@ -1456,7 +1463,7 @@ function TaskEditModal({ open, editTask, onClose, onSave, onDelete, assigneeHist
       setStartKey(editTask?.start_key || today)
       setEndKey(editTask?.end_key || today)
       setStartPM(false); setEndAM(false)
-      setColor('orange'); setMemo('')
+      setColor('green'); setMemo('')
     }
   }, [open, editTask])
 
@@ -1579,17 +1586,47 @@ function TaskEditModal({ open, editTask, onClose, onSave, onDelete, assigneeHist
         </div>
 
         <Label>工種</Label>
-        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:14}}>
-          {CATEGORIES.map(c=>(
-            <button key={c.id} onClick={()=>setColor(c.id)}
-              style={{padding:'7px 12px',borderRadius:7,border:color===c.id?`2px solid ${c.color}`:'1px solid var(--border)',
-                background:color===c.id?c.color:'var(--surface)',
-                color:color===c.id?'#fff':'var(--text-2)',
-                fontSize:12,fontWeight:600,fontFamily:'var(--font-jp)',cursor:'pointer'}}>
-              {c.label}
-            </button>
-          ))}
+        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:6}}>
+          {CATEGORIES.map(c=>{
+            // 「その他」の場合: color===c.id(gray) または HEXカラーが選択中ならアクティブ
+            const isActive = c.id==='gray'
+              ? (color==='gray' || (color?.startsWith?.('#')))
+              : color===c.id
+            const dispColor = isActive && c.id==='gray' && color?.startsWith?.('#') ? color : c.color
+            return (
+              <button key={c.id} onClick={()=>setColor(c.id==='gray' && color?.startsWith?.('#') ? color : c.id)}
+                style={{padding:'7px 12px',borderRadius:7,
+                  border:isActive?`2px solid ${dispColor}`:'1px solid var(--border)',
+                  background:isActive?dispColor:'var(--surface)',
+                  color:isActive?'#fff':'var(--text-2)',
+                  fontSize:12,fontWeight:600,fontFamily:'var(--font-jp)',cursor:'pointer'}}>
+                {c.label}
+              </button>
+            )
+          })}
         </div>
+        {/* 「その他」選択時のカラーピッカー */}
+        {(color==='gray' || color?.startsWith?.('#')) && (
+          <div style={{marginBottom:14,padding:'10px 12px',background:'var(--surface-2)',
+            borderRadius:8,border:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+            <span style={{fontSize:11,fontWeight:600,color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>カスタムカラー</span>
+            <input type="color"
+              value={color?.startsWith?.('#') ? color : '#6B7280'}
+              onChange={e=>setColor(e.target.value)}
+              style={{width:36,height:28,borderRadius:5,border:'1px solid var(--border)',
+                padding:2,cursor:'pointer',background:'var(--surface)'}}/>
+            <span style={{fontSize:11,fontFamily:'var(--font-mono)',color:'var(--text-3)'}}>
+              {color?.startsWith?.('#') ? color : '#6B7280'}
+            </span>
+            {/* プリセットカラー */}
+            {['#E05252','#E07030','#B8960C','#3D8A4F','#3B6FB0','#7B5BA8','#2B8FA8','#1F7A6B','#6B7280'].map(hex=>(
+              <button key={hex} onClick={()=>setColor(hex)}
+                style={{width:20,height:20,borderRadius:'50%',background:hex,
+                  border:color===hex?'2.5px solid var(--text)':'2px solid var(--surface)',
+                  cursor:'pointer',flexShrink:0}}/>
+            ))}
+          </div>
+        )}
 
         <Label>メモ</Label>
         <textarea value={memo} onChange={e=>setMemo(e.target.value)} placeholder="メモ（任意）"
@@ -1867,7 +1904,7 @@ export default function App() {
   const filteredTasks = useMemo(()=>{
     const q = search.trim().toLowerCase()
     return tasks.filter(t=>{
-      if(activeCats.length>0 && !activeCats.includes(t.color)) return false
+      if(activeCats.length>0 && !activeCats.includes(effectiveCatId(t.color))) return false
       if(q){
         const hay = `${t.text||''} ${t.assignee||''} ${t.memo||''} ${catById(t.color).label}`.toLowerCase()
         if(!hay.includes(q)) return false
