@@ -881,7 +881,7 @@ const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, 
   const dragRef = useRef(null)
 
   const DATE_H = bp === 'mobile' ? 24 : 26
-  const TASK_H = bp === 'mobile' ? 20 : 22
+  const TASK_H = bp === 'mobile' ? 36 : 40
 
   const startDrag = useCallback((e, task, cellDate) => {
     e.stopPropagation(); e.preventDefault()
