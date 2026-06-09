@@ -208,6 +208,123 @@ function useBreakpoint() {
 }
 
 // ────────────────────────────────────────────────
+// Auth hook  (passwords stored in Supabase app_config)
+// ────────────────────────────────────────────────
+function useAuth() {
+  const [role, setRole] = useState(()=> sessionStorage.getItem('kh-role') || null)
+  const [config, setConfig] = useState(null)
+  const [configLoading, setConfigLoading] = useState(true)
+
+  useEffect(()=>{
+    supabase.from('app_config').select('*').then(({data})=>{
+      const cfg={}
+      ;(data||[]).forEach(r=>{ cfg[r.key]=r.value })
+      setConfig(cfg)
+      setConfigLoading(false)
+    })
+  }, [])
+
+  const login = useCallback((password)=>{
+    if(!config) return null
+    if(password===config.edit_password){
+      const r='editor'; setRole(r); sessionStorage.setItem('kh-role',r); return r
+    }
+    if(password===config.view_password){
+      const r='viewer'; setRole(r); sessionStorage.setItem('kh-role',r); return r
+    }
+    return null
+  }, [config])
+
+  const logout = useCallback(()=>{
+    setRole(null); sessionStorage.removeItem('kh-role')
+  }, [])
+
+  return { role, login, logout, configLoading }
+}
+
+// ────────────────────────────────────────────────
+// Login Screen
+// ────────────────────────────────────────────────
+function LoginScreen({ onLogin, theme, onToggleTheme }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleLogin = () => {
+    if(!password.trim()) return
+    setLoading(true)
+    const result = onLogin(password)
+    setLoading(false)
+    if(!result) {
+      setError('パスワードが違います')
+      setPassword('')
+    }
+  }
+
+  return (
+    <div style={{height:'100vh',width:'100vw',background:'var(--bg)',
+      display:'flex',alignItems:'center',justifyContent:'center',
+      flexDirection:'column',gap:0}}>
+
+      {/* Theme toggle top-right */}
+      <div style={{position:'absolute',top:16,right:16}}>
+        <IconButton icon={theme==='dark'?'sun':'moon'} onClick={onToggleTheme}
+          title={theme==='dark'?'ライトモード':'ダークモード'}/>
+      </div>
+
+      <div style={{width:340,maxWidth:'90vw',background:'var(--surface)',
+        border:'1px solid var(--border)',borderRadius:14,padding:'36px 32px',
+        boxShadow:'var(--shadow-lg)',animation:'slideUp .2s ease'}}>
+
+        {/* Logo */}
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:28}}>
+          <div style={{width:40,height:40,borderRadius:9,background:'var(--text)',color:'var(--surface)',
+            display:'flex',alignItems:'center',justifyContent:'center',
+            fontWeight:700,fontSize:18,fontFamily:'var(--font-jp)'}}>工</div>
+          <div>
+            <div style={{fontSize:17,fontWeight:700,fontFamily:'var(--font-jp)',color:'var(--text)'}}>工程表</div>
+            <div style={{fontSize:11,color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>ログインしてください</div>
+          </div>
+        </div>
+
+        {/* Password input */}
+        <div style={{marginBottom:error?8:16}}>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--text-3)',fontFamily:'var(--font-jp)',
+            textTransform:'uppercase',letterSpacing:'.06em',marginBottom:6}}>パスワード</div>
+          <input
+            type="password" autoFocus value={password}
+            onChange={e=>{ setPassword(e.target.value); setError('') }}
+            onKeyDown={e=>{ if(e.key==='Enter') handleLogin() }}
+            placeholder="パスワードを入力"
+            style={{width:'100%',height:40,padding:'0 12px',background:'var(--surface-2)',
+              border:`1px solid ${error?'#D42020':'var(--border)'}`,borderRadius:8,
+              fontSize:14,color:'var(--text)',fontFamily:'var(--font-jp)',outline:'none'}}
+            onFocus={e=>e.currentTarget.style.borderColor=error?'#D42020':'var(--accent)'}
+            onBlur={e=>e.currentTarget.style.borderColor=error?'#D42020':'var(--border)'}/>
+        </div>
+
+        {error && (
+          <div style={{fontSize:12,color:'#D42020',fontFamily:'var(--font-jp)',marginBottom:12}}>{error}</div>
+        )}
+
+        <button onClick={handleLogin} disabled={!password.trim()||loading}
+          style={{width:'100%',height:42,background:'var(--accent)',border:'1px solid var(--accent-2)',
+            borderRadius:8,cursor:'pointer',fontSize:14,fontWeight:600,color:'#fff',
+            fontFamily:'var(--font-jp)',opacity:(!password.trim()||loading)?.5:1}}>
+          {loading ? '確認中…' : 'ログイン'}
+        </button>
+
+        <div style={{marginTop:16,padding:'12px',background:'var(--surface-2)',borderRadius:7,
+          fontSize:11,color:'var(--text-3)',fontFamily:'var(--font-jp)',lineHeight:1.7}}>
+          ・<b style={{color:'var(--text-2)'}}>編集用パスワード</b>：タスクの追加・編集・削除が可能<br/>
+          ・<b style={{color:'var(--text-2)'}}>閲覧用パスワード</b>：工程の閲覧のみ
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────
 // Icon component (SVG inline)
 // ────────────────────────────────────────────────
 function Icon({ name, size=16 }) {
@@ -263,7 +380,7 @@ function IconButton({ icon, label, onClick, primary, active, size=32, title }) {
 // ────────────────────────────────────────────────
 // Header
 // ────────────────────────────────────────────────
-function Header({ bp, view, setView, search, setSearch, onOpenDrawer, onAdd, onPrint, onToggleTheme, theme, viewOptions, searchExpanded, setSearchExpanded, currentProject, onBack }) {
+function Header({ bp, view, setView, search, setSearch, onOpenDrawer, onAdd, onPrint, onToggleTheme, theme, viewOptions, searchExpanded, setSearchExpanded, currentProject, onBack, isViewer, onLogout }) {
   return (
     <header style={{
       gridArea:'header',display:'flex',alignItems:'center',
@@ -354,10 +471,25 @@ function Header({ bp, view, setView, search, setSearch, onOpenDrawer, onAdd, onP
 
       {!searchExpanded && (
         <>
+          {isViewer && (
+            <span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'2px 8px',
+              borderRadius:20,background:'rgba(59,111,176,.12)',color:'#3B6FB0',
+              fontSize:10.5,fontWeight:600,fontFamily:'var(--font-jp)',flexShrink:0}}>
+              閲覧のみ
+            </span>
+          )}
           <IconButton icon={theme==='dark'?'sun':'moon'} onClick={onToggleTheme} title={theme==='dark'?'ライトモード':'ダークモード'}/>
           {bp==='desktop' && <div style={{width:1,height:24,background:'var(--border)'}}/>}
           <IconButton icon="print" label={bp==='desktop'?'印刷':null} onClick={onPrint}/>
-          <IconButton icon="plus" label={bp==='desktop'?'タスク追加':null} primary onClick={onAdd}/>
+          {!isViewer && <IconButton icon="plus" label={bp==='desktop'?'タスク追加':null} primary onClick={onAdd}/>}
+          <button onClick={onLogout}
+            style={{height:30,padding:'0 10px',background:'transparent',border:'1px solid var(--border)',
+              borderRadius:6,cursor:'pointer',fontSize:11.5,color:'var(--text-3)',
+              fontFamily:'var(--font-jp)',flexShrink:0,whiteSpace:'nowrap'}}
+            onMouseEnter={e=>e.currentTarget.style.background='var(--surface-3)'}
+            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+            ログアウト
+          </button>
         </>
       )}
     </header>
@@ -570,7 +702,7 @@ function BottomTabBar({ view, setView, options }) {
 // ────────────────────────────────────────────────
 // Gantt View (task-row layout with label column)
 // ────────────────────────────────────────────────
-const GanttView = memo(function GanttView({ tasks, rangeStart, rangeDays, bp, onSelect, resizeTask, toggleDone }) {
+const GanttView = memo(function GanttView({ tasks, rangeStart, rangeDays, bp, onSelect, resizeTask, toggleDone, isViewer }) {
   const base = parseKey(rangeStart)
   const colDates = useMemo(()=> Array.from({length:rangeDays},(_,i)=>addDays(base,i)), [rangeStart,rangeDays])
   const chartRef = useRef(null)
@@ -826,16 +958,16 @@ const GanttView = memo(function GanttView({ tasks, rangeStart, rangeDays, bp, on
                         opacity:t.done?.45:1,
                         textDecoration:t.done?'line-through':'none',
                         whiteSpace:'nowrap',overflow:'hidden'}}>
-                        <div onMouseDown={e=>startResize(e,t,'left')} onTouchStart={e=>startResize(e,t,'left')}
+                        {!isViewer && <div onMouseDown={e=>startResize(e,t,'left')} onTouchStart={e=>startResize(e,t,'left')}
                           style={{position:'absolute',left:0,top:0,bottom:0,width:bp==='mobile'?18:9,
-                            cursor:'col-resize',touchAction:'none',zIndex:2}}/>
+                            cursor:'col-resize',touchAction:'none',zIndex:2}}/>}
                         <span style={{overflow:'hidden',textOverflow:'ellipsis',flex:1}}>{t.text}</span>
                         {width > 120 && t.assignee && (
                           <span style={{opacity:.85,fontSize:10,fontWeight:500}}>{t.assignee}</span>
                         )}
-                        <div onMouseDown={e=>startResize(e,t,'right')} onTouchStart={e=>startResize(e,t,'right')}
+                        {!isViewer && <div onMouseDown={e=>startResize(e,t,'right')} onTouchStart={e=>startResize(e,t,'right')}
                           style={{position:'absolute',right:0,top:0,bottom:0,width:bp==='mobile'?18:9,
-                            cursor:'col-resize',touchAction:'none',zIndex:2}}/>
+                            cursor:'col-resize',touchAction:'none',zIndex:2}}/>}
                       </div>
                     )}
                     {/* Memo (below bar) */}
@@ -871,7 +1003,7 @@ const GanttView = memo(function GanttView({ tasks, rangeStart, rangeDays, bp, on
 // ────────────────────────────────────────────────
 // Calendar View — week rows with spanning task bars
 // ────────────────────────────────────────────────
-const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, bp, onSelect, toggleDone, moveTask, onAddOn }) {
+const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, bp, onSelect, toggleDone, moveTask, onAddOn, isViewer }) {
   const base = parseKey(rangeStart)
   const startOfWeek = addDays(base, -base.getDay())
   const weeks = Math.ceil((rangeDays + base.getDay()) / 7)
@@ -884,6 +1016,7 @@ const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, 
   const TASK_H = bp === 'mobile' ? 36 : 40
 
   const startDrag = useCallback((e, task, cellDate) => {
+    if(isViewer) return
     e.stopPropagation(); e.preventDefault()
     const grid = gridRef.current
     if(!grid) return
@@ -1034,7 +1167,7 @@ const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, 
                   return (
                     <div key={di}
                       onClick={e=>{
-                        if(!dragRef.current?.moved && !outOfRange) onAddOn?.(toKey(date))
+                        if(!dragRef.current?.moved && !outOfRange && !isViewer) onAddOn?.(toKey(date))
                       }}
                       style={{
                         borderRight:di<6?'1px solid var(--border)':'none',
@@ -1263,7 +1396,7 @@ const AgendaView = memo(function AgendaView({ tasks, rangeStart, rangeDays, bp, 
 // ────────────────────────────────────────────────
 // List View
 // ────────────────────────────────────────────────
-const ListView = memo(function ListView({ tasks, bp, onSelect, toggleDone, deleteTask }) {
+const ListView = memo(function ListView({ tasks, bp, onSelect, toggleDone, deleteTask, isViewer }) {
   const sorted = useMemo(()=> [...tasks].sort((a,b)=> a.start_key.localeCompare(b.start_key)), [tasks])
 
   return (
@@ -1339,12 +1472,14 @@ const ListView = memo(function ListView({ tasks, bp, onSelect, toggleDone, delet
               <span style={{fontSize:12,fontFamily:'var(--font-jp)',color:'var(--text-2)',
                 overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.assignee||'—'}</span>
               <div style={{display:'flex',justifyContent:'flex-end',gap:4}}>
-                <button onClick={e=>{e.stopPropagation();deleteTask(t.id)}}
-                  style={{width:26,height:26,padding:0,background:'transparent',border:'1px solid var(--border)',
-                    borderRadius:5,cursor:'pointer',color:'var(--text-3)',
-                    display:'flex',alignItems:'center',justifyContent:'center'}}>
-                  <Icon name="trash" size={13}/>
-                </button>
+                {!isViewer && (
+                  <button onClick={e=>{e.stopPropagation();deleteTask(t.id)}}
+                    style={{width:26,height:26,padding:0,background:'transparent',border:'1px solid var(--border)',
+                      borderRadius:5,cursor:'pointer',color:'var(--text-3)',
+                      display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    <Icon name="trash" size={13}/>
+                  </button>
+                )}
               </div>
             </div>
           )
@@ -1362,7 +1497,7 @@ const ListView = memo(function ListView({ tasks, bp, onSelect, toggleDone, delet
 // ────────────────────────────────────────────────
 // Task Detail Panel
 // ────────────────────────────────────────────────
-function TaskDetailPanel({ task, onClose, bp, onEdit, onToggleDone, onDelete }) {
+function TaskDetailPanel({ task, onClose, bp, onEdit, onToggleDone, onDelete, isViewer }) {
   if(!task) return null
   const cat = catById(task.color)
   const start = parseKey(task.start_key), end = parseKey(task.end_key)
@@ -1429,23 +1564,25 @@ function TaskDetailPanel({ task, onClose, bp, onEdit, onToggleDone, onDelete }) 
         )}
       </div>
 
-      <div style={{display:'flex',gap:8,padding:16,borderTop:'1px solid var(--border)',flexShrink:0}}>
-        <button onClick={()=>onToggleDone(task.id, !task.done)}
-          style={{flex:1,height:40,background:task.done?'var(--surface-2)':'#1F8A5B',color:task.done?'var(--text-2)':'#fff',
-            border:task.done?'1px solid var(--border)':'none',borderRadius:7,cursor:'pointer',
-            fontSize:13,fontWeight:500,fontFamily:'var(--font-jp)'}}>
-          {task.done?'未完了に戻す':'完了にする'}
-        </button>
-        <button onClick={()=>onEdit(task)}
-          style={{flex:1,height:40,background:'var(--accent)',color:'#fff',border:'none',borderRadius:7,
-            cursor:'pointer',fontSize:13,fontWeight:500,fontFamily:'var(--font-jp)'}}>編集</button>
-        <button onClick={()=>{if(confirm('削除しますか？')) onDelete(task.id)}}
-          style={{width:40,height:40,background:'var(--surface-2)',color:'#D42020',
-            border:'1px solid var(--border)',borderRadius:7,cursor:'pointer',
-            display:'flex',alignItems:'center',justifyContent:'center'}}>
-          <Icon name="trash" size={15}/>
-        </button>
-      </div>
+      {!isViewer && (
+        <div style={{display:'flex',gap:8,padding:16,borderTop:'1px solid var(--border)',flexShrink:0}}>
+          <button onClick={()=>onToggleDone(task.id, !task.done)}
+            style={{flex:1,height:40,background:task.done?'var(--surface-2)':'#1F8A5B',color:task.done?'var(--text-2)':'#fff',
+              border:task.done?'1px solid var(--border)':'none',borderRadius:7,cursor:'pointer',
+              fontSize:13,fontWeight:500,fontFamily:'var(--font-jp)'}}>
+            {task.done?'未完了に戻す':'完了にする'}
+          </button>
+          <button onClick={()=>onEdit(task)}
+            style={{flex:1,height:40,background:'var(--accent)',color:'#fff',border:'none',borderRadius:7,
+              cursor:'pointer',fontSize:13,fontWeight:500,fontFamily:'var(--font-jp)'}}>編集</button>
+          <button onClick={()=>{if(confirm('削除しますか？')) onDelete(task.id)}}
+            style={{width:40,height:40,background:'var(--surface-2)',color:'#D42020',
+              border:'1px solid var(--border)',borderRadius:7,cursor:'pointer',
+              display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <Icon name="trash" size={15}/>
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1917,14 +2054,14 @@ function ProjectsScreen({ bp, projects, loading, onCreate, onEnter, onDelete }) 
               現場を選んで工程表を管理する
             </p>
           </div>
-          <button onClick={onCreate}
+          {onCreate && <button onClick={onCreate}
             style={{display:'inline-flex',alignItems:'center',gap:6,height:36,padding:'0 16px',
               background:'var(--accent)',border:'1px solid var(--accent-2)',borderRadius:8,
               cursor:'pointer',fontSize:13,fontFamily:'var(--font-jp)',color:'#fff',fontWeight:600,
               boxShadow:'var(--shadow-sm)'}}>
             <Icon name="plus" size={14}/>
             {bp!=='mobile' && '新規現場を追加'}
-          </button>
+          </button>}
         </div>
 
         {loading ? (
@@ -1971,6 +2108,8 @@ function ProjectsScreen({ bp, projects, loading, onCreate, onEnter, onDelete }) 
 // ────────────────────────────────────────────────
 export default function App() {
   const bp = useBreakpoint()
+  const { role, login, logout, configLoading } = useAuth()
+  const isViewer = role === 'viewer'
   const [theme, setTheme] = useState(()=> localStorage.getItem('kh-theme') || 'light')
   const [view, setView] = useState('calendar')
   const [rangeStart, setRangeStart] = useState(()=> toKey(addDays(new Date(), -3)))
@@ -2246,6 +2385,22 @@ export default function App() {
     gridTemplateAreas:`"header" "subheader" "main" "tabbar"`,
   }
 
+  // ── Login screen ──
+  if(!role) {
+    return (
+      <>
+        <style>{CSS}</style>
+        {configLoading
+          ? <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',
+              background:'var(--bg)',color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>読み込み中…</div>
+          : <LoginScreen onLogin={login} theme={theme}
+              onToggleTheme={()=>setTheme(t=>t==='dark'?'light':'dark')}/>
+        }
+        {toastMsg && <div className="kh-toast">{toastMsg}</div>}
+      </>
+    )
+  }
+
   // ── Projects screen (no project selected) ──
   if(currentProjectId === null) {
     return (
@@ -2262,24 +2417,37 @@ export default function App() {
               display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,
               fontFamily:'var(--font-jp)',flexShrink:0}}>工</div>
             <span style={{fontSize:14,fontWeight:600,fontFamily:'var(--font-jp)',color:'var(--text)',flex:1}}>工程表</span>
+            {isViewer && (
+              <span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'2px 8px',
+                borderRadius:20,background:'rgba(59,111,176,.12)',color:'#3B6FB0',
+                fontSize:10.5,fontWeight:600,fontFamily:'var(--font-jp)'}}>閲覧のみ</span>
+            )}
             <IconButton icon={theme==='dark'?'sun':'moon'}
               onClick={()=>setTheme(t=>t==='dark'?'light':'dark')}
               title={theme==='dark'?'ライトモード':'ダークモード'}/>
+            <button onClick={logout}
+              style={{height:30,padding:'0 10px',background:'transparent',border:'1px solid var(--border)',
+                borderRadius:6,cursor:'pointer',fontSize:11.5,color:'var(--text-3)',
+                fontFamily:'var(--font-jp)',whiteSpace:'nowrap'}}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--surface-3)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              ログアウト
+            </button>
           </header>
 
           <ProjectsScreen
             bp={bp}
             projects={projects}
             loading={projectsLoading}
-            onCreate={()=>setProjectModalOpen(true)}
+            onCreate={isViewer ? null : ()=>setProjectModalOpen(true)}
             onEnter={enterProject}
-            onDelete={deleteProject}/>
+            onDelete={isViewer ? null : deleteProject}/>
         </div>
 
-        <ProjectCreateModal
+        {!isViewer && <ProjectCreateModal
           open={projectModalOpen}
           onClose={()=>setProjectModalOpen(false)}
-          onSave={saveProject}/>
+          onSave={saveProject}/>}
 
         {toastMsg && <div className="kh-toast">{toastMsg}</div>}
       </>
@@ -2305,6 +2473,8 @@ export default function App() {
           searchExpanded={searchExpanded} setSearchExpanded={setSearchExpanded}
           currentProject={currentProject}
           onBack={backToProjects}
+          isViewer={isViewer}
+          onLogout={logout}
         />
 
         {bp==='desktop' && (
@@ -2321,9 +2491,9 @@ export default function App() {
             <div style={{padding:60,textAlign:'center',color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>読み込み中…</div>
           ) : (
             <>
-              {view==='gantt'    && <GanttView    tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} resizeTask={resizeTask} toggleDone={toggleDone}/>}
-              {view==='calendar' && <CalendarView tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone} moveTask={moveTask} onAddOn={(dateKey)=>{ setEditTask({ start_key:dateKey, end_key:dateKey }); setModalOpen(true) }}/>}
-              {view==='list'     && <ListView     tasks={filteredTasks} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone} deleteTask={deleteTask}/>}
+              {view==='gantt'    && <GanttView    tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} resizeTask={resizeTask} toggleDone={toggleDone} isViewer={isViewer}/>}
+              {view==='calendar' && <CalendarView tasks={filteredTasks} rangeStart={rangeStart} rangeDays={rangeDays} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone} moveTask={moveTask} onAddOn={(dateKey)=>{ setEditTask({ start_key:dateKey, end_key:dateKey }); setModalOpen(true) }} isViewer={isViewer}/>}
+              {view==='list'     && <ListView     tasks={filteredTasks} bp={bp} onSelect={setSelectedTask} toggleDone={toggleDone} deleteTask={deleteTask} isViewer={isViewer}/>}
             </>
           )}
         </main>
@@ -2334,13 +2504,14 @@ export default function App() {
           <TaskDetailPanel task={selectedTask} bp={bp}
             onClose={()=>setSelectedTask(null)}
             onEdit={t=>{setEditTask(t); setModalOpen(true); setSelectedTask(null)}}
-            onToggleDone={toggleDone} onDelete={deleteTask}/>
+            onToggleDone={toggleDone} onDelete={deleteTask}
+            isViewer={isViewer}/>
         )}
 
-        <TaskEditModal open={modalOpen} editTask={editTask}
+        {!isViewer && <TaskEditModal open={modalOpen} editTask={editTask}
           onClose={()=>{setModalOpen(false); setEditTask(null)}}
           onSave={saveTask} onDelete={deleteTask}
-          assigneeHistory={assigneeHistory} removeFromHistory={removeFromHistory} bp={bp}/>
+          assigneeHistory={assigneeHistory} removeFromHistory={removeFromHistory} bp={bp}/>}
 
         {printPreview && <PrintPreviewBar onClose={()=>setPrintPreview(false)}/>}
 
