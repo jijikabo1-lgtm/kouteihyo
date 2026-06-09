@@ -235,17 +235,21 @@ function useAuth() {
     return null
   }, [config])
 
+  const loginAsViewer = useCallback(()=>{
+    const r='viewer'; setRole(r); sessionStorage.setItem('kh-role',r)
+  }, [])
+
   const logout = useCallback(()=>{
     setRole(null); sessionStorage.removeItem('kh-role')
   }, [])
 
-  return { role, login, logout, configLoading }
+  return { role, login, loginAsViewer, logout, configLoading }
 }
 
 // ────────────────────────────────────────────────
 // Login Screen
 // ────────────────────────────────────────────────
-function LoginScreen({ onLogin, theme, onToggleTheme }) {
+function LoginScreen({ onLogin, onLoginAsViewer, theme, onToggleTheme }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -310,14 +314,27 @@ function LoginScreen({ onLogin, theme, onToggleTheme }) {
         <button onClick={handleLogin} disabled={!password.trim()||loading}
           style={{width:'100%',height:42,background:'var(--accent)',border:'1px solid var(--accent-2)',
             borderRadius:8,cursor:'pointer',fontSize:14,fontWeight:600,color:'#fff',
-            fontFamily:'var(--font-jp)',opacity:(!password.trim()||loading)?.5:1}}>
-          {loading ? '確認中…' : 'ログイン'}
+            fontFamily:'var(--font-jp)',opacity:(!password.trim()||loading)?.5:1,marginBottom:10}}>
+          {loading ? '確認中…' : '編集者としてログイン'}
         </button>
 
-        <div style={{marginTop:16,padding:'12px',background:'var(--surface-2)',borderRadius:7,
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+          <div style={{flex:1,height:1,background:'var(--border)'}}/>
+          <span style={{fontSize:11,color:'var(--text-4)',fontFamily:'var(--font-jp)'}}>または</span>
+          <div style={{flex:1,height:1,background:'var(--border)'}}/>
+        </div>
+
+        <button onClick={onLoginAsViewer}
+          style={{width:'100%',height:40,background:'var(--surface-2)',border:'1px solid var(--border)',
+            borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:500,color:'var(--text-2)',
+            fontFamily:'var(--font-jp)'}}>
+          閲覧のみで入る（パスワード不要）
+        </button>
+
+        <div style={{marginTop:14,padding:'10px 12px',background:'var(--surface-2)',borderRadius:7,
           fontSize:11,color:'var(--text-3)',fontFamily:'var(--font-jp)',lineHeight:1.7}}>
-          ・<b style={{color:'var(--text-2)'}}>編集用パスワード</b>：タスクの追加・編集・削除が可能<br/>
-          ・<b style={{color:'var(--text-2)'}}>閲覧用パスワード</b>：工程の閲覧のみ
+          編集者ログインはパスワードが必要です<br/>
+          閲覧のみはパスワード不要で工程を確認できます
         </div>
       </div>
     </div>
@@ -2108,7 +2125,7 @@ function ProjectsScreen({ bp, projects, loading, onCreate, onEnter, onDelete }) 
 // ────────────────────────────────────────────────
 export default function App() {
   const bp = useBreakpoint()
-  const { role, login, logout, configLoading } = useAuth()
+  const { role, login, loginAsViewer, logout, configLoading } = useAuth()
   const isViewer = role === 'viewer'
   const [theme, setTheme] = useState(()=> localStorage.getItem('kh-theme') || 'light')
   const [view, setView] = useState('calendar')
@@ -2393,7 +2410,7 @@ export default function App() {
         {configLoading
           ? <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',
               background:'var(--bg)',color:'var(--text-3)',fontFamily:'var(--font-jp)'}}>読み込み中…</div>
-          : <LoginScreen onLogin={login} theme={theme}
+          : <LoginScreen onLogin={login} onLoginAsViewer={loginAsViewer} theme={theme}
               onToggleTheme={()=>setTheme(t=>t==='dark'?'light':'dark')}/>
         }
         {toastMsg && <div className="kh-toast">{toastMsg}</div>}
