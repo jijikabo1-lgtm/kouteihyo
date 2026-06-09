@@ -1176,7 +1176,7 @@ const CalendarView = memo(function CalendarView({ tasks, rangeStart, rangeDays, 
                   const date = addDays(rowStart, di)
                   const isT = sameDay(date, today)
                   const we = isWeekend(date)
-                  const outOfRange = date < base || date >= addDays(base, rangeDays)
+                  const outOfRange = date >= addDays(base, rangeDays)
                   const nTasks = rowTasks.filter(t=>{
                     const s=parseKey(t.start_key),e=parseKey(t.end_key)
                     return date>=s && date<=e
